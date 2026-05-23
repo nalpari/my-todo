@@ -1,14 +1,13 @@
-"use client";
-
-import { useState } from "react";
-import { AuthScreen } from "@/components/AuthScreen";
+import { redirect } from "next/navigation";
+import { createClient } from "@/lib/supabase/server";
 import { VariantBSplit } from "@/components/VariantBSplit";
 
-export default function Home() {
-  const [signedIn, setSignedIn] = useState(false);
+export default async function Home() {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) redirect("/login");
 
-  if (!signedIn) {
-    return <AuthScreen onSignIn={() => setSignedIn(true)} />;
-  }
-  return <VariantBSplit onSignOut={() => setSignedIn(false)} />;
+  return <VariantBSplit />;
 }
