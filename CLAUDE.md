@@ -74,10 +74,29 @@ User-facing strings are in **Korean** (the app name is "치트키 Todo"). Keep n
 
 `@/*` → `./src/*` (configured in `tsconfig.json`). Use `@/components/...` and `@/lib/...` rather than relative paths.
 
+## Auth (Supabase)
+
+Google OAuth 만 활성화되어 있고, 데이터는 여전히 mock 입니다. Auth 만 붙고 CRUD 는 다음 phase 입니다.
+
+- **프로젝트**: `tprewdmslvayiihukefg` (region `ap-northeast-2`, Postgres 17)
+- **환경변수** (`.env.example` 참고):
+  - `NEXT_PUBLIC_SUPABASE_URL` — 프로젝트 URL
+  - `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` — publishable key (`sb_publishable_…`). legacy anon JWT 는 쓰지 않음.
+  - `NEXT_PUBLIC_SITE_URL` — OAuth `redirectTo` 베이스 (예: `http://localhost:3000`)
+- **인증 흐름**: `/` (RSC 가드) → 미인증 시 `/login` → `signInWithGoogle` Server Action → Google → `/auth/callback` 에서 `exchangeCodeForSession` → `/` 복귀. 실패 시 `/login?error=…` 로 돌아오고 AuthScreen 카드 위에 한 줄 표시.
+- **핵심 파일**:
+  - `src/lib/supabase/{client,server,middleware}.ts` — `@supabase/ssr` 의 세 가지 클라이언트
+  - `src/middleware.ts` — 모든 요청에서 세션 쿠키 갱신 (정적 자산 제외 표준 matcher)
+  - `src/app/{page,login/page}.tsx` — RSC 가드. 인증 상태에 따라 양방향 redirect.
+  - `src/app/auth/actions.ts` — `signInWithGoogle`, `signOut` Server Actions
+  - `src/app/auth/callback/route.ts` — OAuth code 교환
+- **로그인/로그아웃 트리거**: 모두 `<form action={…}>` + Server Action. PKCE verifier 가 httpOnly cookie 에 저장되어 XSS 안전.
+- **표시용 사용자 정보**: `page.tsx` 에서 Supabase `User` → `DisplayUser({name,email,avatarUrl?})` 로 추출 후 AppSidebar 로 prop drilling. `full_name` 이 없으면 `email.split("@")[0]` fallback. 아바타는 아직 첫 글자만 표시 (이미지 로드는 다음 PR).
+- **남은 정리** (다음 PR 시작 시): 이번 작업과 무관한 이전 실험 흔적인 `public.todos` 테이블 (20행, 본 앱 스키마와 무관) 과 unused `auth.users` test 계정 정리.
+
 ## Not in scope (don't add unprompted)
 
-- Auth backend / Supabase wiring — the user has explicitly chosen visual-only for now.
-- Persistent storage — mock data only.
+- Persistent storage — mock data only. 데이터 모델 (Projects/Tags/Tasks) 의 DB 마이그레이션과 RLS 는 다음 phase.
 - Variants A and C — deferred.
 - A test framework.
 
