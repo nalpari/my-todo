@@ -1,12 +1,15 @@
 "use client";
 
 import type { CSSProperties } from "react";
+import { signOut } from "@/app/auth/actions";
 import { KeyHint, MonoLabel, ProjectDot, TagChip } from "./Primitives";
 import { PROJECTS, TAGS } from "@/lib/data";
 
-type SidebarProps = { active?: string; compact?: boolean; onSignOut?: () => void };
+export type DisplayUser = { name: string; email: string; avatarUrl?: string };
 
-export const AppSidebar = ({ active = "today", compact = false, onSignOut }: SidebarProps) => {
+type SidebarProps = { active?: string; compact?: boolean; user: DisplayUser };
+
+export const AppSidebar = ({ active = "today", compact = false, user }: SidebarProps) => {
   const navItems = [
     { id: "today",    label: "오늘",   count: 5,  kbd: "⌘1" },
     { id: "upcoming", label: "예정",   count: 8,  kbd: "⌘2" },
@@ -19,18 +22,20 @@ export const AppSidebar = ({ active = "today", compact = false, onSignOut }: Sid
     <aside style={{ ...S.sidebar, width: compact ? 220 : 260 }}>
       {/* user block */}
       <div style={S.userRow}>
-        <div style={S.avatar}>김</div>
+        <div style={S.avatar}>{user.name.charAt(0) || "?"}</div>
         <div style={{ minWidth: 0, flex: 1 }}>
-          <div style={S.userName}>김재훈</div>
-          <div style={S.userEmail}>jaehoon@cheatkey.kr</div>
+          <div style={S.userName}>{user.name}</div>
+          <div style={S.userEmail}>{user.email}</div>
         </div>
-        <button style={S.iconBtn} aria-label="settings" type="button" onClick={onSignOut}>
-          <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
-            <circle cx="3" cy="8" r="1.5" fill="currentColor" />
-            <circle cx="8" cy="8" r="1.5" fill="currentColor" />
-            <circle cx="13" cy="8" r="1.5" fill="currentColor" />
-          </svg>
-        </button>
+        <form action={signOut}>
+          <button style={S.iconBtn} aria-label="sign out" type="submit">
+            <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
+              <circle cx="3" cy="8" r="1.5" fill="currentColor" />
+              <circle cx="8" cy="8" r="1.5" fill="currentColor" />
+              <circle cx="13" cy="8" r="1.5" fill="currentColor" />
+            </svg>
+          </button>
+        </form>
       </div>
 
       {/* primary nav */}
