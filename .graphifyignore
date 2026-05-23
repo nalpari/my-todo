@@ -1,0 +1,29 @@
+# Build artifacts and dependencies
+node_modules/
+.next/
+out/
+dist/
+build/
+
+# Lockfiles and generated metadata
+pnpm-lock.yaml
+package-lock.json
+yarn.lock
+skills-lock.json
+tsconfig.tsbuildinfo
+next-env.d.ts
+
+# Tool state
+graphify-out/
+.claude/
+.agents/
+
+# Next.js boilerplate icons — no architectural meaning
+public/
+
+# Secrets / env
+.env
+.env.*
+
+# Logs
+*.log
