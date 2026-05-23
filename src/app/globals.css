@@ -1,26 +1,83 @@
 @import "tailwindcss";
 
+/* Pretendard is loaded via <link> in app/layout.tsx — Tailwind 4 inlines its
+   own CSS at the @import site, which would make any sibling @import invalid. */
+
+/* =============================================================
+   치트키 Todo — warm-dark editorial design system
+   Fonts: Fraunces (display, via next/font), JetBrains Mono
+   (mono, via next/font), Pretendard (Korean body, @import above)
+   ============================================================= */
+
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  /* Surfaces — warm dark, never bluish */
+  --bg-page:        #262624;
+  --bg-sidebar:     #1f1e1d;
+  --bg-surface:     #2d2c2a;
+  --bg-elevated:    #302f2e;
+  --bg-code:        #141413;
+
+  /* Text — warm paper-white scale */
+  --text-display:   #faf9f5;
+  --text-primary:   #faf9f5;
+  --text-secondary: #c2c0b6;
+  --text-muted:     #9c9a92;
+  --text-faint:     #6b6964;
+
+  /* Accent — the single coral */
+  --accent:         #d97757;
+  --accent-bright:  #e58a6c;
+  --accent-deep:    #c4623d;
+  --accent-dim:     rgba(217, 119, 87, 0.10);
+  --accent-wash:    rgba(217, 119, 87, 0.16);
+  --accent-glow:    rgba(217, 119, 87, 0.28);
+
+  /* Borders */
+  --border:         rgba(255, 255, 255, 0.07);
+  --border-strong:  rgba(255, 255, 255, 0.12);
+  --border-accent:  rgba(217, 119, 87, 0.28);
+
+  --bg-code-inline: rgba(217, 119, 87, 0.10);
+
+  /* Shadows */
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.30);
+  --shadow-md: 0 6px 18px rgba(0, 0, 0, 0.35);
+  --shadow-lg: 0 16px 50px rgba(0, 0, 0, 0.50);
+  --glow-accent: 0 0 0 1px var(--border-accent), 0 8px 32px rgba(217, 119, 87, 0.15);
+
+  /* Radii */
+  --radius-sm:   6px;
+  --radius:      10px;
+  --radius-lg:   16px;
+  --radius-full: 999px;
+
+  /* Spacing scale (used as guide) */
+  --space-1:  4px;  --space-2:  8px;  --space-3: 12px; --space-4: 16px;
+  --space-5: 20px;  --space-6: 24px;  --space-8: 32px; --space-10: 40px;
+  --space-14: 56px; --space-20: 80px;
+
+  /* Font families — variables come from next/font in layout.tsx */
+  --font-display: var(--font-fraunces), 'Pretendard', ui-serif, Georgia, serif;
+  --font-body:    'Pretendard', -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+  --font-mono:    var(--font-jetbrains-mono), ui-monospace, 'SF Mono', Menlo, monospace;
 }
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
+*, *::before, *::after { box-sizing: border-box; }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+html, body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  background: var(--bg-page);
+  color: var(--text-secondary);
+  font-family: var(--font-body);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
+
+/* Hide scrollbars where the design wants a clean edge */
+.no-scrollbar { scrollbar-width: none; }
+.no-scrollbar::-webkit-scrollbar { display: none; }
