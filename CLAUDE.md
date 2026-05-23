@@ -85,8 +85,8 @@ Google OAuth 만 활성화되어 있고, 데이터는 여전히 mock 입니다. 
   - `NEXT_PUBLIC_SITE_URL` — OAuth `redirectTo` 베이스 (예: `http://localhost:3000`)
 - **인증 흐름**: `/` (RSC 가드) → 미인증 시 `/login` → `signInWithGoogle` Server Action → Google → `/auth/callback` 에서 `exchangeCodeForSession` → `/` 복귀. 실패 시 `/login?error=…` 로 돌아오고 AuthScreen 카드 위에 한 줄 표시.
 - **핵심 파일**:
-  - `src/lib/supabase/{client,server,middleware}.ts` — `@supabase/ssr` 의 세 가지 클라이언트
-  - `src/middleware.ts` — 모든 요청에서 세션 쿠키 갱신 (정적 자산 제외 표준 matcher)
+  - `src/lib/supabase/{client,server,proxy}.ts` — `@supabase/ssr` 의 세 가지 클라이언트
+  - `src/proxy.ts` — Next.js 16 의 proxy convention (구 middleware). 모든 요청에서 세션 쿠키 갱신, 정적 자산 제외 표준 matcher
   - `src/app/{page,login/page}.tsx` — RSC 가드. 인증 상태에 따라 양방향 redirect.
   - `src/app/auth/actions.ts` — `signInWithGoogle`, `signOut` Server Actions
   - `src/app/auth/callback/route.ts` — OAuth code 교환
