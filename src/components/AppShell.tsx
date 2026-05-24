@@ -6,8 +6,9 @@ import { useRef, useState, useTransition } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { signOut } from "@/app/auth/actions";
 import { createTask } from "@/app/tasks/actions";
-import { KeyHint, MonoLabel, TagChip } from "./Primitives";
+import { KeyHint, MonoLabel } from "./Primitives";
 import { ProjectList } from "./ProjectList";
+import { TagList } from "./TagList";
 import { useApp } from "@/lib/AppContext";
 import { toISODate } from "@/lib/data";
 import { parseView, toggleViewHref, type ViewKey } from "@/lib/view";
@@ -21,7 +22,7 @@ type SidebarProps = { compact?: boolean; user: DisplayUser };
  * inbox 분리 (Q3-a) 적용 후 정의 충돌 해소됨.
  */
 export const AppSidebar = ({ compact = false, user }: SidebarProps) => {
-  const { tags, tasks } = useApp();
+  const { tasks } = useApp();
   const router = useRouter();
   const searchParams = useSearchParams();
   const activeView = parseView(searchParams.get("view"));
@@ -86,16 +87,7 @@ export const AppSidebar = ({ compact = false, user }: SidebarProps) => {
       <ProjectList />
 
       {/* tags */}
-      <div style={S.section}>
-        <div style={S.sectionHead}>
-          <MonoLabel tracking={1.4} size={10}>Tags</MonoLabel>
-        </div>
-        <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-          {tags.map((t) => (
-            <TagChip key={t.id} id={t.id} small />
-          ))}
-        </div>
-      </div>
+      <TagList />
 
       {/* shortcut */}
       <div style={S.shortcutBox}>
