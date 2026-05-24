@@ -8,6 +8,7 @@ import { AppSidebar, AppTopBar, InputBar, type DisplayUser } from "./AppShell";
 import { MiniCalendar, SubtaskMeter } from "./TaskRow";
 import { TaskList, EmptyState } from "./TaskList";
 import { TaskTagsEditor } from "./TaskTagsEditor";
+import { SubtaskList } from "./SubtaskList";
 import { AppProvider, useApp } from "@/lib/AppContext";
 import { toISODate, type Task } from "@/lib/data";
 import { type AppData } from "@/lib/queries";
@@ -436,6 +437,7 @@ const TimelineCard = ({ task }: { task: Task }) => {
   const [hovered, setHovered] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
   const [editValue, setEditValue] = useState(task.title);
+  const [expanded, setExpanded] = useState(false);
 
   const handleBlur = () => {
     setIsEditing(false);
@@ -488,9 +490,15 @@ const TimelineCard = ({ task }: { task: Task }) => {
         )}
         {task.subtotal > 0 && (
           <div style={{ marginTop: 6 }}>
-            <SubtaskMeter total={task.subtotal} done={task.subdone} />
+            <SubtaskMeter
+              total={task.subtotal}
+              done={task.subdone}
+              expanded={expanded}
+              onClick={() => setExpanded((v) => !v)}
+            />
           </div>
         )}
+        {expanded && <SubtaskList taskId={task.id} />}
       </div>
       <Checkbox done={task.done} size={16} onClick={() => toggleTask(task.id, task.done)} />
       {hovered && (
