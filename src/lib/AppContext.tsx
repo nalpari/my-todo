@@ -6,12 +6,15 @@ import { type Project, type Tag, type Task } from "@/lib/data";
 import { type AppData } from "@/lib/queries";
 import { toggleTask as toggleTaskAction, deleteTask as deleteTaskAction, updateTask as updateTaskAction } from "@/app/tasks/actions";
 import { createProject as createProjectAction, updateProject as updateProjectAction, deleteProject as deleteProjectAction } from "@/app/projects/actions";
+import { createTag as createTagAction, deleteTag as deleteTagAction, assignTag as assignTagAction, unassignTag as unassignTagAction } from "@/app/tags/actions";
 import { DEFAULT_PROJECT_COLOR } from "@/lib/palette";
 
 /* ─── 컨텍스트 타입 ─────────────────────────────────────────── */
 
 /** 토스트가 같은 메시지를 연속 표시할 때도 타이머가 재시작되도록 ts 동반 */
 export type AppError = { msg: string; ts: number };
+
+type TagHue = "accent" | "muted";
 
 type AppContextValue = {
   projects: Project[];
@@ -26,6 +29,12 @@ type AppContextValue = {
   updateProject: (id: string, fields: { name?: string; color?: string }) => void;
   /** 삭제 → tasks 의 project 도 낙관적으로 null 로 cascade. */
   deleteProject: (id: string) => void;
+  /** 새 태그 — id 는 클라이언트가 crypto.randomUUID() 로 미리 발급. */
+  createTag: (id: string, name: string, hue: TagHue) => void;
+  /** 삭제 → tasks.tags 에서 해당 tagId 모두 제거 cascade (DB 의 task_tags ON DELETE CASCADE 미러). */
+  deleteTag: (id: string) => void;
+  assignTag: (taskId: string, tagId: string) => void;
+  unassignTag: (taskId: string, tagId: string) => void;
   /** 가장 최근 액션 실패. null 이면 토스트 숨김 */
   error: AppError | null;
   /** 외부에서도 에러 띄울 수 있게 노출 (예: InputBar) */
@@ -37,7 +46,7 @@ const AppContext = createContext<AppContextValue | null>(null);
 
 /* ─── 낙관 reducer 의 통합 state 와 액션 타입 ──────────────── */
 
-type OptimisticState = { projects: Project[]; tasks: Task[] };
+type OptimisticState = { projects: Project[]; tags: Tag[]; tasks: Task[] };
 
 type OptimisticAction =
   | { type: "task.toggle"; id: string }
@@ -45,7 +54,11 @@ type OptimisticAction =
   | { type: "task.updateTitle"; id: string; title: string }
   | { type: "project.create"; project: Project }
   | { type: "project.update"; id: string; name?: string; color?: string }
-  | { type: "project.delete"; id: string };
+  | { type: "project.delete"; id: string }
+  | { type: "tag.create"; tag: Tag }
+  | { type: "tag.delete"; id: string }
+  | { type: "tag.assign"; taskId: string; tagId: string }
+  | { type: "tag.unassign"; taskId: string; tagId: string };
 
 function reducer(state: OptimisticState, action: OptimisticAction): OptimisticState {
   switch (action.type) {
@@ -77,8 +90,36 @@ function reducer(state: OptimisticState, action: OptimisticAction): OptimisticSt
       // DB 의 ON DELETE SET NULL 과 동일한 결과를 클라이언트에 미리 반영해
       // revalidate 전 0.1-0.3s 동안 lookup miss 가 깜박이지 않게 한다.
       return {
+        ...state,
         projects: state.projects.filter((p) => p.id !== action.id),
         tasks: state.tasks.map((t) => (t.project === action.id ? { ...t, project: null } : t)),
+      };
+    case "tag.create":
+      return { ...state, tags: [...state.tags, action.tag] };
+    case "tag.delete":
+      // cascade: DB 의 task_tags ON DELETE CASCADE 와 동일 — 소속 task 의 tags 배열에서 제거.
+      return {
+        ...state,
+        tags: state.tags.filter((g) => g.id !== action.id),
+        tasks: state.tasks.map((t) =>
+          t.tags.includes(action.id) ? { ...t, tags: t.tags.filter((id) => id !== action.id) } : t,
+        ),
+      };
+    case "tag.assign":
+      return {
+        ...state,
+        tasks: state.tasks.map((t) =>
+          t.id === action.taskId && !t.tags.includes(action.tagId)
+            ? { ...t, tags: [...t.tags, action.tagId] }
+            : t,
+        ),
+      };
+    case "tag.unassign":
+      return {
+        ...state,
+        tasks: state.tasks.map((t) =>
+          t.id === action.taskId ? { ...t, tags: t.tags.filter((id) => id !== action.tagId) } : t,
+        ),
       };
     default:
       return state;
@@ -92,7 +133,7 @@ export function AppProvider({ appData, children }: { appData: AppData; children:
   const [error, setError] = useState<AppError | null>(null);
 
   const [optimistic, applyOptimistic] = useOptimistic(
-    { projects: appData.projects, tasks: appData.tasks },
+    { projects: appData.projects, tags: appData.tags, tasks: appData.tasks },
     reducer,
   );
 
@@ -159,6 +200,34 @@ export function AppProvider({ appData, children }: { appData: AppData; children:
     });
   };
 
+  const createTag = (id: string, name: string, hue: TagHue) => {
+    startTransition(() => {
+      applyOptimistic({ type: "tag.create", tag: { id, name, hue } });
+      void runAction(() => createTagAction(id, name, hue));
+    });
+  };
+
+  const deleteTag = (id: string) => {
+    startTransition(() => {
+      applyOptimistic({ type: "tag.delete", id });
+      void runAction(() => deleteTagAction(id));
+    });
+  };
+
+  const assignTag = (taskId: string, tagId: string) => {
+    startTransition(() => {
+      applyOptimistic({ type: "tag.assign", taskId, tagId });
+      void runAction(() => assignTagAction(taskId, tagId));
+    });
+  };
+
+  const unassignTag = (taskId: string, tagId: string) => {
+    startTransition(() => {
+      applyOptimistic({ type: "tag.unassign", taskId, tagId });
+      void runAction(() => unassignTagAction(taskId, tagId));
+    });
+  };
+
   const reportError = (msg: string) => setError({ msg, ts: Date.now() });
   const dismissError = () => setError(null);
 
@@ -166,7 +235,7 @@ export function AppProvider({ appData, children }: { appData: AppData; children:
     <AppContext.Provider
       value={{
         projects: optimistic.projects,
-        tags: appData.tags,
+        tags: optimistic.tags,
         tasks: optimistic.tasks,
         toggleTask,
         deleteTask,
@@ -174,6 +243,10 @@ export function AppProvider({ appData, children }: { appData: AppData; children:
         createProject,
         updateProject,
         deleteProject,
+        createTag,
+        deleteTag,
+        assignTag,
+        unassignTag,
         error,
         reportError,
         dismissError,
