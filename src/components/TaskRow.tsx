@@ -1,8 +1,10 @@
 "use client";
 
 import type { CSSProperties } from "react";
+import { useState } from "react";
 import { Checkbox, MonoLabel, ProjectDot, TagChip } from "./Primitives";
-import { projectById, type Task } from "@/lib/data";
+import { useApp } from "@/lib/AppContext";
+import { type Task } from "@/lib/data";
 
 export type ItemStyle = "editorial" | "card" | "minimal";
 
@@ -19,8 +21,31 @@ export const TaskRow = ({
   showProject?: boolean;
   showTime?: boolean;
 }) => {
-  const project = projectById(task.project);
+  const { toggleTask, deleteTask, updateTaskTitle, projects } = useApp();
+  const project = task.project ? projects.find((p) => p.id === task.project) : null;
   const hasSub = task.subtotal > 0;
+  const [isEditing, setIsEditing] = useState(false);
+  const [editValue, setEditValue] = useState(task.title);
+  const [hovered, setHovered] = useState(false);
+
+  const handleTitleBlur = () => {
+    setIsEditing(false);
+    if (editValue.trim() && editValue !== task.title) {
+      updateTaskTitle(task.id, editValue.trim());
+    } else {
+      setEditValue(task.title);
+    }
+  };
+
+  const handleTitleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === "Enter") {
+      (e.target as HTMLInputElement).blur();
+    }
+    if (e.key === "Escape") {
+      setEditValue(task.title);
+      setIsEditing(false);
+    }
+  };
 
   if (style === "card") {
     return (
@@ -34,9 +59,12 @@ export const TaskRow = ({
           border: `1px solid ${focused ? "var(--border-accent)" : "var(--border)"}`,
           background: focused ? "rgba(217,119,87,0.04)" : "var(--bg-surface)",
           transition: "border-color .2s",
+          position: "relative",
         }}
+        onMouseEnter={() => setHovered(true)}
+        onMouseLeave={() => setHovered(false)}
       >
-        <Checkbox done={task.done} />
+        <Checkbox done={task.done} onClick={() => toggleTask(task.id, task.done)} />
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ display: "flex", alignItems: "baseline", gap: 10, marginBottom: 6 }}>
             {showProject && project && (
@@ -57,66 +85,83 @@ export const TaskRow = ({
               </span>
             )}
           </div>
-          <div
-            style={{
-              fontSize: 14.5,
-              fontWeight: 500,
-              color: task.done ? "var(--text-faint)" : "var(--text-display)",
-              textDecoration: task.done ? "line-through" : "none",
-              letterSpacing: -0.1,
-              lineHeight: 1.4,
-              marginBottom: 8,
-            }}
-          >
-            {task.title}
-          </div>
+          {isEditing ? (
+            <input
+              value={editValue}
+              onChange={(e) => setEditValue(e.target.value)}
+              onBlur={handleTitleBlur}
+              onKeyDown={handleTitleKeyDown}
+              autoFocus
+              style={{
+                fontSize: 14.5, fontWeight: 500, letterSpacing: -0.1, lineHeight: 1.4,
+                background: "transparent", border: "none", outline: "none",
+                color: "var(--text-display)", fontFamily: "var(--font-body)", width: "100%",
+              }}
+            />
+          ) : (
+            <div
+              onClick={() => setIsEditing(true)}
+              style={{
+                fontSize: 14.5, fontWeight: 500,
+                color: task.done ? "var(--text-faint)" : "var(--text-display)",
+                textDecoration: task.done ? "line-through" : "none",
+                letterSpacing: -0.1, lineHeight: 1.4, marginBottom: 8, cursor: "text",
+              }}
+            >
+              {task.title}
+            </div>
+          )}
           <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-            {showTime && task.time && (
-              <span
-                style={{
-                  fontFamily: "var(--font-mono)",
-                  fontSize: 11,
-                  color: "var(--text-muted)",
-                  letterSpacing: 0.4,
-                }}
-              >
-                {task.time}
+            {showTime && task.due_time && (
+              <span style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--text-muted)", letterSpacing: 0.4 }}>
+                {task.due_time}
               </span>
             )}
-            {task.tags.map((t) => (
-              <TagChip key={t} id={t} small />
-            ))}
+            {task.tags.map((t) => <TagChip key={t} id={t} small />)}
             {hasSub && <SubtaskMeter total={task.subtotal} done={task.subdone} />}
           </div>
         </div>
+        {hovered && (
+          <button
+            onClick={() => deleteTask(task.id)}
+            style={deleteBtn}
+            aria-label="삭제"
+            type="button"
+          >
+            ×
+          </button>
+        )}
       </div>
     );
   }
 
   if (style === "minimal") {
     return (
-      <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "8px 4px", borderRadius: 4 }}>
-        <Checkbox done={task.done} size={16} />
+      <div
+        style={{ display: "flex", alignItems: "center", gap: 12, padding: "8px 4px", borderRadius: 4, position: "relative" }}
+        onMouseEnter={() => setHovered(true)}
+        onMouseLeave={() => setHovered(false)}
+      >
+        <Checkbox done={task.done} size={16} onClick={() => toggleTask(task.id, task.done)} />
         <span
           style={{
             fontSize: 14,
             color: task.done ? "var(--text-faint)" : "var(--text-secondary)",
             textDecoration: task.done ? "line-through" : "none",
-            flex: 1,
-            minWidth: 0,
-            letterSpacing: -0.1,
-            overflow: "hidden",
-            textOverflow: "ellipsis",
-            whiteSpace: "nowrap",
+            flex: 1, minWidth: 0, letterSpacing: -0.1,
+            overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
           }}
         >
           {task.title}
         </span>
         {showProject && project && <ProjectDot id={task.project} size={6} />}
-        {showTime && task.time && (
+        {showTime && task.due_time && (
           <span style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--text-faint)", letterSpacing: 0.3 }}>
-            {task.time}
+            {task.due_time}
           </span>
+        )}
+        {hovered && (
+          <button onClick={() => deleteTask(task.id)} style={deleteBtn} aria-label="삭제" type="button">×</button>
         )}
       </div>
     );
@@ -134,56 +179,61 @@ export const TaskRow = ({
         margin: focused ? "0 -16px" : 0,
         borderBottom: "1px solid var(--border)",
         background: focused ? "rgba(217,119,87,0.04)" : undefined,
+        position: "relative",
       }}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
     >
       <span
         style={{
-          fontFamily: "var(--font-mono)",
-          fontSize: 11,
-          color: task.time ? "var(--text-muted)" : "var(--text-faint)",
-          letterSpacing: 0.4,
-          paddingTop: 3,
+          fontFamily: "var(--font-mono)", fontSize: 11,
+          color: task.due_time ? "var(--text-muted)" : "var(--text-faint)",
+          letterSpacing: 0.4, paddingTop: 3,
         }}
       >
-        {showTime ? task.time || "—:—" : ""}
+        {showTime ? task.due_time || "—:—" : ""}
       </span>
 
       <div style={{ paddingTop: 1 }}>
-        <Checkbox done={task.done} />
+        <Checkbox done={task.done} onClick={() => toggleTask(task.id, task.done)} />
       </div>
 
       <div style={{ minWidth: 0 }}>
-        <div
-          style={{
-            fontSize: 15,
-            fontWeight: 500,
-            color: task.done ? "var(--text-faint)" : "var(--text-display)",
-            textDecoration: task.done ? "line-through" : "none",
-            letterSpacing: -0.15,
-            lineHeight: 1.4,
-          }}
-        >
-          {task.title}
-        </div>
+        {isEditing ? (
+          <input
+            value={editValue}
+            onChange={(e) => setEditValue(e.target.value)}
+            onBlur={handleTitleBlur}
+            onKeyDown={handleTitleKeyDown}
+            autoFocus
+            style={{
+              fontSize: 15, fontWeight: 500, letterSpacing: -0.15, lineHeight: 1.4,
+              background: "transparent", border: "none", outline: "none",
+              color: "var(--text-display)", fontFamily: "var(--font-body)", width: "100%",
+            }}
+          />
+        ) : (
+          <div
+            onClick={() => setIsEditing(true)}
+            style={{
+              fontSize: 15, fontWeight: 500,
+              color: task.done ? "var(--text-faint)" : "var(--text-display)",
+              textDecoration: task.done ? "line-through" : "none",
+              letterSpacing: -0.15, lineHeight: 1.4, cursor: "text",
+            }}
+          >
+            {task.title}
+          </div>
+        )}
         {((showProject && project) || task.tags.length > 0 || hasSub) && (
           <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", marginTop: 6 }}>
             {showProject && project && (
-              <span
-                style={{
-                  display: "inline-flex",
-                  alignItems: "center",
-                  gap: 5,
-                  fontSize: 11.5,
-                  color: "var(--text-muted)",
-                }}
-              >
+              <span style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 11.5, color: "var(--text-muted)" }}>
                 <ProjectDot id={task.project} size={6} />
                 {project.name}
               </span>
             )}
-            {task.tags.map((t) => (
-              <TagChip key={t} id={t} small />
-            ))}
+            {task.tags.map((t) => <TagChip key={t} id={t} small />)}
             {hasSub && <SubtaskMeter total={task.subtotal} done={task.subdone} />}
           </div>
         )}
@@ -191,43 +241,41 @@ export const TaskRow = ({
 
       <span
         style={{
-          fontFamily: "var(--font-display)",
-          fontStyle: "italic",
+          fontFamily: "var(--font-display)", fontStyle: "italic",
           fontVariationSettings: '"opsz" 14, "wght" 400',
-          fontSize: 13,
-          color: "var(--text-faint)",
+          fontSize: 13, color: hovered ? "var(--accent)" : "var(--text-faint)",
+          cursor: hovered ? "pointer" : "default",
+          transition: "color .15s",
         }}
+        onClick={hovered ? () => deleteTask(task.id) : undefined}
+        title={hovered ? "삭제" : undefined}
       >
-        № {String(task.id).padStart(2, "0")}
+        {hovered ? "×" : `№ ${String(task.id).slice(-4)}`}
       </span>
     </div>
   );
 };
 
+const deleteBtn: CSSProperties = {
+  position: "absolute", right: 8, top: "50%", transform: "translateY(-50%)",
+  width: 20, height: 20, borderRadius: 4,
+  background: "rgba(217,119,87,0.12)", border: "1px solid var(--border-accent)",
+  color: "var(--accent-bright)", fontSize: 14, lineHeight: 1,
+  display: "flex", alignItems: "center", justifyContent: "center",
+  cursor: "pointer", padding: 0,
+};
+
 export const SubtaskMeter = ({ total, done }: { total: number; done: number }) => (
   <span
     style={{
-      display: "inline-flex",
-      alignItems: "center",
-      gap: 6,
-      fontFamily: "var(--font-mono)",
-      fontSize: 10,
-      color: "var(--text-muted)",
-      letterSpacing: 0.3,
+      display: "inline-flex", alignItems: "center", gap: 6,
+      fontFamily: "var(--font-mono)", fontSize: 10,
+      color: "var(--text-muted)", letterSpacing: 0.3,
     }}
   >
     <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
-      <rect
-        x="2"
-        y="3"
-        width="3"
-        height="3"
-        rx="0.5"
-        stroke="currentColor"
-        strokeWidth="1.3"
-        fill={done > 0 ? "currentColor" : "none"}
-        opacity={done > 0 ? 0.7 : 1}
-      />
+      <rect x="2" y="3" width="3" height="3" rx="0.5" stroke="currentColor" strokeWidth="1.3"
+        fill={done > 0 ? "currentColor" : "none"} opacity={done > 0 ? 0.7 : 1} />
       <line x1="7" y1="4.5" x2="14" y2="4.5" stroke="currentColor" strokeWidth="1.3" />
       <rect x="2" y="10" width="3" height="3" rx="0.5" stroke="currentColor" strokeWidth="1.3" />
       <line x1="7" y1="11.5" x2="14" y2="11.5" stroke="currentColor" strokeWidth="1.3" />
@@ -238,97 +286,74 @@ export const SubtaskMeter = ({ total, done }: { total: number; done: number }) =
 
 /* ─── Mini calendar (right rail) ───────────────────────────── */
 export const MiniCalendar = ({ compact = false }: { compact?: boolean }) => {
-  const days = Array.from({ length: 35 }, (_, i) => {
-    const d = i - 3;
-    return {
-      n: d <= 0 ? 30 + d : d > 31 ? d - 31 : d,
-      dim: d <= 0 || d > 31,
-      today: d === 26,
-      hasTask: [25, 26, 27, 28, 29].includes(d) || d === 31,
-      heavy: d === 26 || d === 27,
-    };
+  const [viewDate, setViewDate] = useState(() => {
+    const now = new Date();
+    return { year: now.getFullYear(), month: now.getMonth() }; // 0-indexed
   });
 
+  const today = new Date();
+  const { year, month } = viewDate;
+
+  const firstDow = new Date(year, month, 1).getDay(); // 0=일
+  const offset = (firstDow + 6) % 7; // 월요일 시작 보정
+  const daysInMonth = new Date(year, month + 1, 0).getDate();
+  const daysInPrev = new Date(year, month, 0).getDate();
+
+  const cells = Array.from({ length: 35 }, (_, i) => {
+    const dayNum = i - offset + 1;
+    if (dayNum <= 0) return { n: daysInPrev + dayNum, dim: true, date: null };
+    if (dayNum > daysInMonth) return { n: dayNum - daysInMonth, dim: true, date: null };
+    const date = new Date(year, month, dayNum);
+    const isToday = date.toDateString() === today.toDateString();
+    return { n: dayNum, dim: false, date, isToday };
+  });
+
+  const monthNames = ["January", "February", "March", "April", "May", "June",
+    "July", "August", "September", "October", "November", "December"];
+  const koMonths = ["1월", "2월", "3월", "4월", "5월", "6월",
+    "7월", "8월", "9월", "10월", "11월", "12월"];
+
+  const prev = () => setViewDate(({ year: y, month: m }) =>
+    m === 0 ? { year: y - 1, month: 11 } : { year: y, month: m - 1 });
+  const next = () => setViewDate(({ year: y, month: m }) =>
+    m === 11 ? { year: y + 1, month: 0 } : { year: y, month: m + 1 });
+
   return (
-    <div
-      style={{
-        padding: compact ? 14 : 18,
-        borderRadius: "var(--radius)",
-        border: "1px solid var(--border)",
-        background: "var(--bg-surface)",
-      }}
-    >
+    <div style={{ padding: compact ? 14 : 18, borderRadius: "var(--radius)", border: "1px solid var(--border)", background: "var(--bg-surface)" }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 12 }}>
         <div>
-          <div
-            style={{
-              fontFamily: "var(--font-display)",
-              fontStyle: "italic",
-              fontVariationSettings: '"opsz" 72, "wght" 380',
-              fontSize: 24,
-              color: "var(--text-display)",
-              letterSpacing: -0.5,
-              lineHeight: 1,
-            }}
-          >
-            May
+          <div style={{ fontFamily: "var(--font-display)", fontStyle: "italic", fontVariationSettings: '"opsz" 72, "wght" 380', fontSize: 24, color: "var(--text-display)", letterSpacing: -0.5, lineHeight: 1 }}>
+            {monthNames[month]}
           </div>
-          <MonoLabel size={10} tracking={1.2}>2026 · 5월</MonoLabel>
+          <MonoLabel size={10} tracking={1.2}>{year} · {koMonths[month]}</MonoLabel>
         </div>
         <div style={{ display: "flex", gap: 4 }}>
-          <button style={miniBtn} type="button">‹</button>
-          <button style={miniBtn} type="button">›</button>
+          <button style={miniBtn} type="button" onClick={prev} aria-label="이전 달">‹</button>
+          <button style={miniBtn} type="button" onClick={next} aria-label="다음 달">›</button>
         </div>
       </div>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 2, marginBottom: 6 }}>
         {["M", "T", "W", "T", "F", "S", "S"].map((d, i) => (
-          <span
-            key={i}
-            style={{
-              fontFamily: "var(--font-mono)",
-              fontSize: 9,
-              color: i >= 5 ? "var(--text-faint)" : "var(--text-muted)",
-              letterSpacing: 0.5,
-              textAlign: "center",
-              paddingBottom: 4,
-            }}
-          >
+          <span key={i} style={{ fontFamily: "var(--font-mono)", fontSize: 9, color: i >= 5 ? "var(--text-faint)" : "var(--text-muted)", letterSpacing: 0.5, textAlign: "center", paddingBottom: 4 }}>
             {d}
           </span>
         ))}
       </div>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 2 }}>
-        {days.map((d, i) => (
+        {cells.map((d, i) => (
           <div
             key={i}
             style={{
               aspectRatio: "1",
-              display: "flex",
-              flexDirection: "column",
-              alignItems: "center",
-              justifyContent: "center",
+              display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
               borderRadius: 5,
-              background: d.today ? "var(--accent)" : "transparent",
-              color: d.today ? "white" : d.dim ? "var(--text-faint)" : "var(--text-secondary)",
-              fontSize: 11.5,
-              fontWeight: d.today ? 600 : 400,
+              background: d.isToday ? "var(--accent)" : "transparent",
+              color: d.isToday ? "white" : d.dim ? "var(--text-faint)" : "var(--text-secondary)",
+              fontSize: 11.5, fontWeight: d.isToday ? 600 : 400,
               fontFamily: "var(--font-body)",
-              position: "relative",
             }}
           >
             {d.n}
-            {d.hasTask && !d.today && (
-              <span
-                style={{
-                  position: "absolute",
-                  bottom: 2,
-                  width: d.heavy ? 4 : 3,
-                  height: d.heavy ? 4 : 3,
-                  borderRadius: "50%",
-                  background: d.heavy ? "var(--accent)" : "var(--text-faint)",
-                }}
-              />
-            )}
           </div>
         ))}
       </div>
@@ -337,12 +362,7 @@ export const MiniCalendar = ({ compact = false }: { compact?: boolean }) => {
 };
 
 const miniBtn: CSSProperties = {
-  width: 22,
-  height: 22,
-  borderRadius: 5,
-  background: "transparent",
-  border: "1px solid var(--border)",
-  color: "var(--text-muted)",
-  fontSize: 13,
-  cursor: "pointer",
+  width: 22, height: 22, borderRadius: 5,
+  background: "transparent", border: "1px solid var(--border)",
+  color: "var(--text-muted)", fontSize: 13, cursor: "pointer",
 };

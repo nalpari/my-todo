@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { VariantBSplit } from "@/components/VariantBSplit";
 import { type DisplayUser } from "@/components/AppShell";
+import { getAppData } from "@/lib/queries";
 
 export default async function Home() {
   const supabase = await createClient();
@@ -22,5 +23,7 @@ export default async function Home() {
         : undefined,
   };
 
-  return <VariantBSplit user={displayUser} />;
+  const appData = await getAppData();
+
+  return <VariantBSplit user={displayUser} appData={appData} />;
 }
