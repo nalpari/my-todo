@@ -147,7 +147,7 @@ DB 마이그레이션 SQL: `supabase/migrations/` (현재 `001_initial_schema.sq
 ### 입력 검증 컨벤션 (tasks Server Action)
 
 - Server Action 은 사실상 public RPC. TS 타입은 런타임 강제력이 없으므로 client 가 임의 키 (`user_id`, `sort_order` 등) 를 보낼 수 있다. `actions.ts` 의 `parseTitle`/`parseNullableDate`/`parseNullableTime`/`parseNullableUuid` 헬퍼가 키 화이트리스트 + 포맷 검증을 담당. `updateTask` 는 `fields: unknown` 으로 받고 명시된 4개 키만 update 객체에 옮긴다.
-- `project_id` 는 `assertOwnedProject` 로 사전 소유권 확인 후 update — 003 의 복합 FK 가 cross-tenant 참조를 어차피 거부하지만, 사용자에게 명확한 에러 메시지 제공.
+- 다른 user 소유 row 를 참조할 수 있는 모든 mutate (tasks 의 project_id, subtasks/task_tags 의 task_id) 는 `assertOwnedProject` / `assertOwnedTask` 로 사전 소유권 확인 후 진행. 003 의 복합 FK 가 cross-tenant 참조를 어차피 거부하지만, FK 위반 raw 메시지 대신 명확한 한국어 에러를 노출하기 위함. FK 위반 (23503) 은 `translateDbError` 가 "참조 대상을 찾을 수 없습니다" 로 변환.
 
 ## 사이드바 view 라우팅 + 프로젝트·태그 필터
 
