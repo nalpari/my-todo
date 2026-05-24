@@ -49,5 +49,8 @@ next-env.d.ts
 .claude/worktrees
 .claude/.last-lint-tsc-ok
 
+# kilo
+.kilo/worktrees
+
 # graphify output
 /graphify-out
