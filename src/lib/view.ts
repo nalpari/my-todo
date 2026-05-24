@@ -120,7 +120,7 @@ export function filterTasks(
   return tasks.filter((t) => {
     if (!isTaskInView(t, view)) return false;
     if (projectId && t.projectId !== projectId) return false;
-    if (tagId && !t.tags.includes(tagId)) return false;
+    if (tagId && !t.tags.some((tg) => tg.id === tagId)) return false;
     return true;
   });
 }

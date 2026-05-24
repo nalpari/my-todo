@@ -147,7 +147,7 @@ export const TaskRow = ({
                 {task.due_time}
               </span>
             )}
-            <TaskTagsEditor taskId={task.id} tagIds={task.tags} active={hovered} />
+            <TaskTagsEditor taskId={task.id} tags={task.tags} active={hovered} />
             {hasSub ? (
               <SubtaskMeter
                 total={task.subtotal}
@@ -275,7 +275,7 @@ export const TaskRow = ({
                 {project.name}
               </span>
             )}
-            <TaskTagsEditor taskId={task.id} tagIds={task.tags} active={hovered} />
+            <TaskTagsEditor taskId={task.id} tags={task.tags} active={hovered} />
             {hasSub ? (
               <SubtaskMeter
                 total={task.subtotal}

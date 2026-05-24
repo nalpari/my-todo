@@ -3,6 +3,7 @@
 import type { CSSProperties } from "react";
 import { useEffect, useRef, useState } from "react";
 import { useApp } from "@/lib/AppContext";
+import { type Tag } from "@/lib/data";
 import { TagChip } from "./Primitives";
 
 /**
@@ -19,24 +20,25 @@ import { TagChip } from "./Primitives";
  */
 export const TaskTagsEditor = ({
   taskId,
-  tagIds,
+  tags,
   active,
 }: {
   taskId: string;
-  tagIds: string[];
+  tags: Tag[];
   active: boolean;
 }) => {
   const { assignTag, unassignTag } = useApp();
   const [pickerOpen, setPickerOpen] = useState(false);
+  const assignedIds = tags.map((t) => t.id);
 
   return (
     <>
-      {tagIds.map((id) => (
+      {tags.map((t) => (
         <TagChip
-          key={id}
-          id={id}
+          key={t.id}
+          tag={t}
           small
-          onRemove={active ? () => unassignTag(taskId, id) : undefined}
+          onRemove={active ? () => unassignTag(taskId, t.id) : undefined}
         />
       ))}
       {(active || pickerOpen) && (
@@ -54,8 +56,8 @@ export const TaskTagsEditor = ({
           {pickerOpen && (
             <TagPickerPopover
               taskId={taskId}
-              assignedIds={tagIds}
-              onAssign={(id) => assignTag(taskId, id)}
+              assignedIds={assignedIds}
+              onAssign={(tag) => assignTag(taskId, tag)}
               onUnassign={(id) => unassignTag(taskId, id)}
               onClose={() => setPickerOpen(false)}
             />
@@ -77,7 +79,7 @@ const TagPickerPopover = ({
 }: {
   taskId: string;
   assignedIds: string[];
-  onAssign: (id: string) => void;
+  onAssign: (tag: Tag) => void;
   onUnassign: (id: string) => void;
   onClose: () => void;
 }) => {
@@ -122,7 +124,7 @@ const TagPickerPopover = ({
                 key={t.id}
                 type="button"
                 aria-pressed={isAssigned}
-                onClick={() => (isAssigned ? onUnassign(t.id) : onAssign(t.id))}
+                onClick={() => (isAssigned ? onUnassign(t.id) : onAssign(t))}
                 title={isAssigned ? "할당 해제" : "할당"}
                 style={{
                   ...S.pickerChip,

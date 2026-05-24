@@ -479,7 +479,7 @@ const TimelineCard = ({ task }: { task: Task }) => {
           <span style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--text-muted)", letterSpacing: 0.5 }}>
             {project?.name}
           </span>
-          <TaskTagsEditor taskId={task.id} tagIds={task.tags} active={hovered} />
+          <TaskTagsEditor taskId={task.id} tags={task.tags} active={hovered} />
         </div>
         {isEditing ? (
           <input
