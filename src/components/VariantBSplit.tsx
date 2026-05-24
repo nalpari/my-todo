@@ -14,6 +14,8 @@ import { TagChip } from "./Primitives";
 const ErrorToast = () => {
   const { error, dismissError } = useApp();
 
+  // error 가 { msg, ts } 객체라 같은 메시지가 연속 발생해도 ts 가 달라
+  // useEffect 가 재실행되고 4초 타이머가 재시작된다.
   useEffect(() => {
     if (!error) return;
     const id = setTimeout(() => dismissError(), 4000);
@@ -25,6 +27,7 @@ const ErrorToast = () => {
   return (
     <div
       role="alert"
+      aria-live="assertive"
       style={{
         position: "fixed", left: "50%", bottom: 92,
         transform: "translateX(-50%)",
@@ -40,17 +43,18 @@ const ErrorToast = () => {
         maxWidth: "min(520px, calc(100% - 80px))",
       }}
     >
-      <span style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--accent)", letterSpacing: 0.5 }}>!</span>
-      <span style={{ flex: 1, color: "var(--text-display)" }}>{error}</span>
+      <span style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--accent)", letterSpacing: 0.5 }} aria-hidden="true">!</span>
+      <span style={{ flex: 1, color: "var(--text-display)" }}>{error.msg}</span>
       <button
         onClick={dismissError}
         aria-label="닫기"
         type="button"
         style={{
           width: 18, height: 18, borderRadius: 3,
-          background: "transparent", border: "none",
+          background: "transparent", border: "1px solid transparent",
           color: "var(--text-muted)", cursor: "pointer",
           fontSize: 14, lineHeight: 1, padding: 0,
+          outlineOffset: 1,
         }}
       >
         ×

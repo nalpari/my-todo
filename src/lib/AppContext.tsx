@@ -1,12 +1,15 @@
 "use client";
 
-import { createContext, useContext, useOptimistic, useCallback, useState, startTransition, type ReactNode } from "react";
+import { createContext, useContext, useOptimistic, useState, startTransition, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import { type Project, type Tag, type Task } from "@/lib/data";
 import { type AppData } from "@/lib/queries";
 import { toggleTask as toggleTaskAction, deleteTask as deleteTaskAction, updateTask as updateTaskAction } from "@/app/tasks/actions";
 
 /* ─── 컨텍스트 타입 ─────────────────────────────────────────── */
+
+/** 토스트가 같은 메시지를 연속 표시할 때도 타이머가 재시작되도록 ts 동반 */
+export type AppError = { msg: string; ts: number };
 
 type AppContextValue = {
   projects: Project[];
@@ -16,8 +19,8 @@ type AppContextValue = {
   toggleTask: (id: string, currentDone: boolean) => void;
   deleteTask: (id: string) => void;
   updateTaskTitle: (id: string, title: string) => void;
-  /** 가장 최근 액션 실패 메시지. null 이면 토스트 숨김 */
-  error: string | null;
+  /** 가장 최근 액션 실패. null 이면 토스트 숨김 */
+  error: AppError | null;
   /** 외부에서도 에러 띄울 수 있게 노출 (예: InputBar) */
   reportError: (msg: string) => void;
   dismissError: () => void;
@@ -29,7 +32,7 @@ const AppContext = createContext<AppContextValue | null>(null);
 
 export function AppProvider({ appData, children }: { appData: AppData; children: ReactNode }) {
   const router = useRouter();
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<AppError | null>(null);
 
   const [optimisticTasks, applyOptimistic] = useOptimistic(
     appData.tasks,
@@ -52,52 +55,41 @@ export function AppProvider({ appData, children }: { appData: AppData; children:
   //
   // Server Action 이 throw 하면 (1) try/catch 로 잡아 에러 메시지를 띄우고
   // (2) router.refresh() 로 서버 상태를 다시 가져와 낙관 잔존을 정정한다.
-  const runAction = useCallback(
-    async (action: () => Promise<void>) => {
-      try {
-        await action();
-        setError(null);
-      } catch (e) {
-        const msg = e instanceof Error ? e.message : "알 수 없는 오류";
-        setError(msg);
-        router.refresh();
-      }
-    },
-    [router],
-  );
+  // react-compiler 가 메모이제이션을 처리하므로 useCallback 은 쓰지 않는다.
+  const runAction = async (action: () => Promise<void>) => {
+    try {
+      await action();
+      setError(null);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : "알 수 없는 오류";
+      setError({ msg, ts: Date.now() });
+      router.refresh();
+    }
+  };
 
-  const toggleTask = useCallback(
-    (id: string, currentDone: boolean) => {
-      startTransition(() => {
-        applyOptimistic({ type: "toggle", id });
-        void runAction(() => toggleTaskAction(id, !currentDone));
-      });
-    },
-    [applyOptimistic, runAction],
-  );
+  const toggleTask = (id: string, currentDone: boolean) => {
+    startTransition(() => {
+      applyOptimistic({ type: "toggle", id });
+      void runAction(() => toggleTaskAction(id, !currentDone));
+    });
+  };
 
-  const deleteTask = useCallback(
-    (id: string) => {
-      startTransition(() => {
-        applyOptimistic({ type: "delete", id });
-        void runAction(() => deleteTaskAction(id));
-      });
-    },
-    [applyOptimistic, runAction],
-  );
+  const deleteTask = (id: string) => {
+    startTransition(() => {
+      applyOptimistic({ type: "delete", id });
+      void runAction(() => deleteTaskAction(id));
+    });
+  };
 
-  const updateTaskTitle = useCallback(
-    (id: string, title: string) => {
-      startTransition(() => {
-        applyOptimistic({ type: "updateTitle", id, title });
-        void runAction(() => updateTaskAction(id, { title }));
-      });
-    },
-    [applyOptimistic, runAction],
-  );
+  const updateTaskTitle = (id: string, title: string) => {
+    startTransition(() => {
+      applyOptimistic({ type: "updateTitle", id, title });
+      void runAction(() => updateTaskAction(id, { title }));
+    });
+  };
 
-  const reportError = useCallback((msg: string) => setError(msg), []);
-  const dismissError = useCallback(() => setError(null), []);
+  const reportError = (msg: string) => setError({ msg, ts: Date.now() });
+  const dismissError = () => setError(null);
 
   return (
     <AppContext.Provider
