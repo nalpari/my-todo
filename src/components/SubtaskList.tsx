@@ -178,7 +178,7 @@ const S: Record<string, CSSProperties> = {
     position: "absolute",
     right: 4, top: "50%", transform: "translateY(-50%)",
     width: 18, height: 18, borderRadius: 3,
-    background: "rgba(217,119,87,0.10)",
+    background: "var(--accent-dim)",
     border: "1px solid var(--border-accent)",
     color: "var(--accent-bright)",
     fontSize: 12, lineHeight: 1, cursor: "pointer",

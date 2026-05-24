@@ -380,7 +380,7 @@ const S: Record<string, CSSProperties> = {
   deleteBtn: {
     height: 20, padding: "0 6px",
     borderRadius: 4,
-    background: "rgba(217,119,87,0.10)",
+    background: "var(--accent-dim)",
     border: "1px solid var(--border-accent)",
     color: "var(--accent-bright)",
     fontSize: 11, lineHeight: 1, cursor: "pointer",
