@@ -33,9 +33,9 @@ type AppContextValue = {
   deleteProject: (id: string) => void;
   /** 새 태그 — id 는 클라이언트가 crypto.randomUUID() 로 미리 발급. */
   createTag: (id: string, name: string, hue: TagHue) => void;
-  /** 삭제 → tasks.tags 에서 해당 tagId 모두 제거 cascade (DB 의 task_tags ON DELETE CASCADE 미러). */
+  /** 삭제 → tasks.tags 에서 해당 tag 도 모두 제거 cascade (DB 의 task_tags ON DELETE CASCADE 미러). */
   deleteTag: (id: string) => void;
-  assignTag: (taskId: string, tagId: string) => void;
+  assignTag: (taskId: string, tag: Tag) => void;
   unassignTag: (taskId: string, tagId: string) => void;
   /** 새 서브태스크 — id 는 클라이언트가 crypto.randomUUID() 로 미리 발급. */
   createSubtask: (id: string, taskId: string, title: string) => void;
@@ -64,7 +64,7 @@ type OptimisticAction =
   | { type: "project.delete"; id: string }
   | { type: "tag.create"; tag: Tag }
   | { type: "tag.delete"; id: string }
-  | { type: "tag.assign"; taskId: string; tagId: string }
+  | { type: "tag.assign"; taskId: string; tag: Tag }
   | { type: "tag.unassign"; taskId: string; tagId: string }
   | { type: "subtask.create"; subtask: Subtask }
   | { type: "subtask.toggle"; id: string; taskId: string }
@@ -118,15 +118,17 @@ function reducer(state: OptimisticState, action: OptimisticAction): OptimisticSt
         ...state,
         tags: state.tags.filter((g) => g.id !== action.id),
         tasks: state.tasks.map((t) =>
-          t.tags.includes(action.id) ? { ...t, tags: t.tags.filter((id) => id !== action.id) } : t,
+          t.tags.some((tg) => tg.id === action.id)
+            ? { ...t, tags: t.tags.filter((tg) => tg.id !== action.id) }
+            : t,
         ),
       };
     case "tag.assign":
       return {
         ...state,
         tasks: state.tasks.map((t) =>
-          t.id === action.taskId && !t.tags.includes(action.tagId)
-            ? { ...t, tags: [...t.tags, action.tagId] }
+          t.id === action.taskId && !t.tags.some((tg) => tg.id === action.tag.id)
+            ? { ...t, tags: [...t.tags, action.tag] }
             : t,
         ),
       };
@@ -134,7 +136,7 @@ function reducer(state: OptimisticState, action: OptimisticAction): OptimisticSt
       return {
         ...state,
         tasks: state.tasks.map((t) =>
-          t.id === action.taskId ? { ...t, tags: t.tags.filter((id) => id !== action.tagId) } : t,
+          t.id === action.taskId ? { ...t, tags: t.tags.filter((tg) => tg.id !== action.tagId) } : t,
         ),
       };
     case "subtask.create":
@@ -271,10 +273,10 @@ export function AppProvider({ appData, children }: { appData: AppData; children:
     });
   };
 
-  const assignTag = (taskId: string, tagId: string) => {
+  const assignTag = (taskId: string, tag: Tag) => {
     startTransition(() => {
-      applyOptimistic({ type: "tag.assign", taskId, tagId });
-      void runAction(() => assignTagAction(taskId, tagId));
+      applyOptimistic({ type: "tag.assign", taskId, tag });
+      void runAction(() => assignTagAction(taskId, tag.id));
     });
   };
 

@@ -99,7 +99,13 @@ export type Task = {
   id: string;           // DB uuid
   title: string;
   projectId: string | null; // DB 의 project_id 를 1:1 미러 — 이름만 카멜케이스로
-  tags: string[];            // tag id 배열
+  /**
+   * task_tags 조인 결과를 인라인 Tag 객체로 들고 온다. TagChip 렌더 시 매번
+   * tags.find() 룩업을 안 해도 되므로 N*M 비용을 N 으로 줄이고 (rowToTask 단계
+   * 1회 룩업), 태그가 삭제·rename 될 때도 reducer 가 task.tags 안의 객체를
+   * 함께 갱신하면 UI 가 즉시 일관된다.
+   */
+  tags: Tag[];
   due_date: string | null;  // ISO date
   due_time: string | null;  // "HH:MM"
   done: boolean;
@@ -203,12 +209,12 @@ export function buildDayBuckets(today: Date): DayBucket[] {
 
 /* ─── TaskRow → Task 변환 ──────────────────────────────────── */
 
-export function rowToTask(row: TaskRow, tagIds: string[], today: Date): Task {
+export function rowToTask(row: TaskRow, tags: Tag[], today: Date): Task {
   return {
     id: row.id,
     title: row.title,
     projectId: row.project_id,
-    tags: tagIds,
+    tags,
     due_date: row.due_date,
     due_time: row.due_time,
     done: row.done,

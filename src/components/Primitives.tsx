@@ -2,7 +2,7 @@
 
 import type { CSSProperties, ReactNode } from "react";
 import { useApp } from "@/lib/AppContext";
-import { type DayBucket } from "@/lib/data";
+import { type DayBucket, type Tag } from "@/lib/data";
 
 /* ─── Checkbox ───────────────────────────────────────────── */
 export const Checkbox = ({
@@ -60,19 +60,20 @@ export const ProjectDot = ({ id, size = 7 }: { id: string | null; size?: number 
 /**
  * onRemove 가 전달되면 chip 우상단에 작은 × 가 항상 노출됨 — 호출처가 "지금 편집 모드"
  * 일 때만 prop 을 넘겨 visibility 를 제어 (TaskRow/TimelineCard 가 호버 상태에 따라 결정).
+ *
+ * task.tags 가 인라인 Tag 객체 배열이므로 chip 도 객체를 그대로 받는다 — 매번 tags.find()
+ * 룩업 없이 즉시 렌더.
  */
 export const TagChip = ({
-  id,
+  tag,
   small = false,
   onRemove,
 }: {
-  id: string;
+  tag: Tag;
   small?: boolean;
   onRemove?: () => void;
 }) => {
-  const { tags } = useApp();
-  const t = tags.find((tg) => tg.id === id);
-  if (!t) return null;
+  const t = tag;
   const isAccent = t.hue === "accent";
   return (
     <span
