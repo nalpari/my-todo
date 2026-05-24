@@ -2,7 +2,7 @@
 
 import type { CSSProperties } from "react";
 import { Checkbox, MonoLabel, ProjectDot } from "./Primitives";
-import { AppSidebar, AppTopBar, InputBar } from "./AppShell";
+import { AppSidebar, AppTopBar, InputBar, type DisplayUser } from "./AppShell";
 import { MiniCalendar, SubtaskMeter } from "./TaskRow";
 import {
   DAY_BUCKETS,
@@ -14,10 +14,10 @@ import {
 import { TagChip } from "./Primitives";
 
 /* ─── Variant B: Calendar + Timeline Split ─────────────────── */
-export const VariantBSplit = ({ onSignOut }: { onSignOut?: () => void }) => {
+export const VariantBSplit = ({ user }: { user: DisplayUser }) => {
   return (
     <div style={S.appRoot}>
-      <AppSidebar active="today" onSignOut={onSignOut} />
+      <AppSidebar active="today" user={user} />
       <div style={S.colMain}>
         <AppTopBar title="이번 주" subtitle="May 25 — 31 · 12 tasks" dense />
 

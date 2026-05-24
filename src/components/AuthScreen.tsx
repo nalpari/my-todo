@@ -1,10 +1,10 @@
-"use client";
-
 import type { CSSProperties } from "react";
-import { GoogleIcon, LogoMark, MonoLabel } from "./Primitives";
+import { signInWithGoogle } from "@/app/auth/actions";
+import { GoogleSignInButton } from "./GoogleSignInButton";
+import { LogoMark, MonoLabel } from "./Primitives";
 
 /* AuthScreen — editorial landing + Google sign-in. */
-export const AuthScreen = ({ onSignIn }: { onSignIn?: () => void }) => {
+export const AuthScreen = ({ error }: { error?: string }) => {
   return (
     <div style={S.root}>
       {/* hairline brand bar */}
@@ -73,6 +73,13 @@ export const AuthScreen = ({ onSignIn }: { onSignIn?: () => void }) => {
         {/* RIGHT — login card */}
         <div style={S.right}>
           <div style={S.loginCard}>
+            {error && (
+              <div style={S.errorBar}>
+                <MonoLabel color="var(--accent)" tracking={1.2}>
+                  로그인 실패 — 다시 시도해주세요
+                </MonoLabel>
+              </div>
+            )}
             <div style={S.cardEyebrow}>
               <MonoLabel color="var(--accent)" tracking={1.5}>SIGN IN</MonoLabel>
             </div>
@@ -82,10 +89,9 @@ export const AuthScreen = ({ onSignIn }: { onSignIn?: () => void }) => {
               비밀번호도, 가입 양식도 없습니다.
             </p>
 
-            <button style={S.googleBtn} onClick={onSignIn} type="button">
-              <GoogleIcon size={18} />
-              <span>Google 계정으로 계속하기</span>
-            </button>
+            <form action={signInWithGoogle}>
+              <GoogleSignInButton style={S.googleBtn} />
+            </form>
 
             <div style={S.divider}>
               <span style={S.dividerLine} />
@@ -240,6 +246,13 @@ const S: Record<string, CSSProperties> = {
     border: "1px solid var(--border-strong)",
     background: "var(--bg-surface)",
     boxShadow: "var(--shadow-md)",
+  },
+  errorBar: {
+    marginBottom: 16,
+    padding: "10px 12px",
+    borderRadius: "var(--radius-sm)",
+    background: "var(--accent-dim)",
+    border: "1px solid var(--border-accent)",
   },
   cardEyebrow: { marginBottom: 14 },
   cardTitle: {

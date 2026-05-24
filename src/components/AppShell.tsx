@@ -1,12 +1,16 @@
 "use client";
 
 import type { CSSProperties } from "react";
+import { useFormStatus } from "react-dom";
+import { signOut } from "@/app/auth/actions";
 import { KeyHint, MonoLabel, ProjectDot, TagChip } from "./Primitives";
 import { PROJECTS, TAGS } from "@/lib/data";
 
-type SidebarProps = { active?: string; compact?: boolean; onSignOut?: () => void };
+export type DisplayUser = { name: string; email: string; avatarUrl?: string };
 
-export const AppSidebar = ({ active = "today", compact = false, onSignOut }: SidebarProps) => {
+type SidebarProps = { active?: string; compact?: boolean; user: DisplayUser };
+
+export const AppSidebar = ({ active = "today", compact = false, user }: SidebarProps) => {
   const navItems = [
     { id: "today",    label: "오늘",   count: 5,  kbd: "⌘1" },
     { id: "upcoming", label: "예정",   count: 8,  kbd: "⌘2" },
@@ -19,18 +23,14 @@ export const AppSidebar = ({ active = "today", compact = false, onSignOut }: Sid
     <aside style={{ ...S.sidebar, width: compact ? 220 : 260 }}>
       {/* user block */}
       <div style={S.userRow}>
-        <div style={S.avatar}>김</div>
+        <div style={S.avatar}>{user.name.charAt(0) || "?"}</div>
         <div style={{ minWidth: 0, flex: 1 }}>
-          <div style={S.userName}>김재훈</div>
-          <div style={S.userEmail}>jaehoon@cheatkey.kr</div>
+          <div style={S.userName}>{user.name}</div>
+          <div style={S.userEmail}>{user.email}</div>
         </div>
-        <button style={S.iconBtn} aria-label="settings" type="button" onClick={onSignOut}>
-          <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
-            <circle cx="3" cy="8" r="1.5" fill="currentColor" />
-            <circle cx="8" cy="8" r="1.5" fill="currentColor" />
-            <circle cx="13" cy="8" r="1.5" fill="currentColor" />
-          </svg>
-        </button>
+        <form action={signOut}>
+          <SignOutButton />
+        </form>
       </div>
 
       {/* primary nav */}
@@ -315,3 +315,27 @@ const S: Record<string, CSSProperties> = {
     fontFamily: "var(--font-mono)", letterSpacing: 0.4,
   },
 };
+
+function SignOutButton() {
+  const { pending } = useFormStatus();
+  return (
+    <button
+      style={{
+        ...S.iconBtn,
+        opacity: pending ? 0.5 : 1,
+        cursor: pending ? "wait" : "pointer",
+      }}
+      aria-label="로그아웃"
+      title="로그아웃"
+      type="submit"
+      disabled={pending}
+    >
+      {/* door + arrow-out — universal logout glyph (kebab 와 혼동 방지) */}
+      <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+        <path d="M6.5 2.5h-3a1 1 0 0 0-1 1v9a1 1 0 0 0 1 1h3" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
+        <path d="M10.5 5l3 3-3 3" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" />
+        <path d="M13.5 8h-7" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
+      </svg>
+    </button>
+  );
+}
