@@ -1,12 +1,12 @@
 "use client";
 
 import type { CSSProperties } from "react";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useSearchParams } from "next/navigation";
 import { Checkbox, MonoLabel, ProjectDot } from "./Primitives";
 import { AppSidebar, AppTopBar, InputBar, type DisplayUser } from "./AppShell";
 import { MiniCalendar, SubtaskMeter } from "./TaskRow";
-import { TaskList } from "./TaskList";
+import { TaskList, EmptyState } from "./TaskList";
 import { AppProvider, useApp } from "@/lib/AppContext";
 import { toISODate, type Task } from "@/lib/data";
 import { type AppData } from "@/lib/queries";
@@ -15,6 +15,7 @@ import {
   parseView,
   parseProjectId,
   filterTasks,
+  filterBySearch,
   viewTitle,
   viewSubtitleContext,
 } from "@/lib/view";
@@ -101,41 +102,81 @@ const VariantBSplitInner = ({ user }: { user: DisplayUser }) => {
   const activeProjectId = parseProjectId(searchParams.get("project"));
   const activeProject = activeProjectId ? projects.find((p) => p.id === activeProjectId) ?? null : null;
 
-  // 뷰 + 프로젝트 필터 적용. 우측 rail 의 다가오는 일정·분포 차트는 의도적으로
-  // 전역 allTasks 사용 — 필터 컨텍스트와 독립된 peripheral view.
-  const visibleTasks = filterTasks(allTasks, view, activeProjectId);
+  // 검색은 URL 에 넣지 않는 client-only state (Round 3 Q2-e). 뷰 전환·새로고침 시 리셋.
+  const [searchQuery, setSearchQuery] = useState("");
+  const searchInputRef = useRef<HTMLInputElement | null>(null);
+  const isSearching = searchQuery.trim().length > 0;
+
+  // ⌘K (mac) / Ctrl+K (Win) → 검색 input 포커스. 입력 중인 다른 input/textarea 가
+  // 있어도 우선 — 어느 곳에서든 검색으로 점프. Esc 는 input 의 onKeyDown 이 처리.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && (e.key === "k" || e.key === "K")) {
+        e.preventDefault();
+        searchInputRef.current?.focus();
+        searchInputRef.current?.select();
+      }
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, []);
+
+  // 필터 체인: view → project → search. 우측 rail 의 다가오는 일정·분포 차트는
+  // 의도적으로 전역 allTasks 사용 — 필터·검색 컨텍스트와 독립된 peripheral view.
+  const visibleTasks = filterBySearch(
+    filterTasks(allTasks, view, activeProjectId),
+    searchQuery,
+    projects,
+  );
 
   const today = now;
   const todayISO = toISODate(today);
 
-  // TopBar 라벨
+  // TopBar 라벨 — 검색 활성이면 subtitle 앞에 검색 표식.
   const title = viewTitle(view);
   const subtitleContext = viewSubtitleContext(view, today);
-  const subtitle =
+  const baseSubtitle =
     `${subtitleContext} · ${visibleTasks.length} tasks` +
     (activeProject ? ` · ${activeProject.name}` : "");
+  const subtitle = isSearching ? `검색: "${searchQuery.trim()}" · ${baseSubtitle}` : baseSubtitle;
+
+  // 중앙 분기 — 검색 활성 + 0 결과면 EmptyState (뷰별 메시지 부적절).
+  // 그 외엔 view==="today" → TodayTimeline (시간 0개도 "all clear" 유지), else → TaskList.
+  const renderCenter = () => {
+    if (isSearching && visibleTasks.length === 0) {
+      return <EmptyState primary="검색 결과가 없습니다" mono={`"${searchQuery.trim()}"`} />;
+    }
+    if (view === "today") {
+      return (
+        <TodayTimeline
+          visibleTasks={visibleTasks}
+          today={today}
+          now={now}
+          todayISO={todayISO}
+        />
+      );
+    }
+    return <TaskList tasks={visibleTasks} view={view} today={today} />;
+  };
 
   return (
     <div style={S.appRoot}>
       <AppSidebar user={user} />
       <div style={S.colMain}>
-        <AppTopBar title={title} subtitle={subtitle} dense />
+        <AppTopBar
+          title={title}
+          subtitle={subtitle}
+          dense
+          searchQuery={searchQuery}
+          onSearchChange={setSearchQuery}
+          searchInputRef={searchInputRef}
+        />
 
         <div style={{ display: "grid", gridTemplateColumns: "1fr 320px", flex: 1, minHeight: 0 }}>
           {/* CENTER — view 에 따라 분기 */}
           <div style={{ ...S.scrollPad, paddingRight: 16 }} className="no-scrollbar">
             <div style={{ padding: "24px 32px 0" }}>
-              {view === "today" ? (
-                <TodayTimeline
-                  visibleTasks={visibleTasks}
-                  allTasks={allTasks}
-                  today={today}
-                  now={now}
-                  todayISO={todayISO}
-                />
-              ) : (
-                <TaskList tasks={visibleTasks} view={view} today={today} />
-              )}
+              {renderCenter()}
               <div style={{ height: 100 }} />
             </div>
 
@@ -200,18 +241,16 @@ const VariantBSplitInner = ({ user }: { user: DisplayUser }) => {
 
 /* ─── TodayTimeline ─────────────────────────────────────────
  * 기존 hour-timeline 로직을 분리. visibleTasks 는 이미 (오늘+overdue + 프로젝트
- * 필터) 적용된 상태. todayTasks 는 시간 그리드에 들어갈 due_date === 오늘 만.
+ * 필터 + 검색) 적용된 상태. todayTasks 는 시간 그리드에 들어갈 due_date === 오늘 만.
  * overdue 는 카운트만 헤더에 표시 (시간 그리드에 자리 없음 — 기존 동작 유지).
  */
 const TodayTimeline = ({
   visibleTasks,
-  allTasks,
   today,
   now,
   todayISO,
 }: {
   visibleTasks: Task[];
-  allTasks: Task[];
   today: Date;
   now: Date;
   todayISO: string;
@@ -291,8 +330,6 @@ const TodayTimeline = ({
             {!hasAny ? " · all clear" : ""}
           </MonoLabel>
         </div>
-        {/* allTasks 는 hook 의존성 일관성을 위해 prop 으로 받지만 현 헤더에서는 사용 안 함 */}
-        <span aria-hidden="true" style={{ display: "none" }}>{allTasks.length}</span>
       </div>
 
       {/* 시간 없는 오늘 태스크 */}

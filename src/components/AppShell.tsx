@@ -112,14 +112,28 @@ export const AppSidebar = ({ compact = false, user }: SidebarProps) => {
   );
 };
 
+/**
+ * searchQuery / onSearchChange / searchInputRef 는 controlled input 패턴.
+ * 부모 (VariantBSplitInner) 가 state 와 ⌘K/Esc 전역 단축키를 소유 — TopBar 는
+ * 순수 view. inputRef 를 prop 으로 받아 부모가 ref.focus() 호출 가능.
+ *
+ * 검색어가 있을 때만 우측 × clear 버튼 노출 (mousedown=preventDefault 로
+ * input focus 유지 — 클릭 직후에도 계속 타이핑 가능).
+ */
 export const AppTopBar = ({
   title,
   subtitle,
   dense = false,
+  searchQuery,
+  onSearchChange,
+  searchInputRef,
 }: {
   title: string;
   subtitle: string;
   dense?: boolean;
+  searchQuery: string;
+  onSearchChange: (value: string) => void;
+  searchInputRef: React.RefObject<HTMLInputElement | null>;
 }) => {
   return (
     <div style={{ ...S.topbar, padding: dense ? "14px 32px" : "20px 40px" }}>
@@ -128,17 +142,47 @@ export const AppTopBar = ({
         <span style={S.topSub}>{subtitle}</span>
       </div>
       <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-        <div style={S.search}>
-          <svg width="13" height="13" viewBox="0 0 16 16" fill="none" style={{ opacity: 0.5 }}>
+        <label style={S.search}>
+          <svg width="13" height="13" viewBox="0 0 16 16" fill="none" style={{ opacity: 0.5, flexShrink: 0 }} aria-hidden="true">
             <circle cx="7" cy="7" r="4.5" stroke="currentColor" strokeWidth="1.4" />
             <path d="M10.5 10.5l3 3" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
           </svg>
-          <span style={{ color: "var(--text-faint)", fontSize: 13 }}>할 일, 프로젝트 검색</span>
-          <span style={{ marginLeft: "auto", display: "flex", gap: 4 }}>
-            <KeyHint>⌘</KeyHint>
-            <KeyHint>K</KeyHint>
-          </span>
-        </div>
+          <input
+            ref={searchInputRef}
+            type="search"
+            value={searchQuery}
+            onChange={(e) => onSearchChange(e.target.value)}
+            onKeyDown={(e) => {
+              // Esc: 검색어 비우고 blur. 입력에 포커스가 있을 때만 동작 — ⌘K 는
+              // 부모의 전역 리스너가 처리해서 어디서든 input 으로 점프.
+              if (e.key === "Escape") {
+                onSearchChange("");
+                (e.target as HTMLInputElement).blur();
+              }
+            }}
+            placeholder="할 일, 프로젝트 검색"
+            aria-label="검색"
+            autoComplete="off"
+            // 일부 브라우저의 type=search 기본 X 버튼 제거 (자체 × 사용)
+            style={S.searchInput}
+          />
+          {searchQuery ? (
+            <button
+              type="button"
+              aria-label="검색어 지우기"
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => onSearchChange("")}
+              style={S.searchClear}
+            >
+              ×
+            </button>
+          ) : (
+            <span style={{ marginLeft: "auto", display: "flex", gap: 4, flexShrink: 0 }}>
+              <KeyHint>⌘</KeyHint>
+              <KeyHint>K</KeyHint>
+            </span>
+          )}
+        </label>
         <button style={S.filterBtn} type="button">
           <span>필터</span>
           <span style={{ color: "var(--accent)" }}>· 2</span>
@@ -287,6 +331,25 @@ const S: Record<string, CSSProperties> = {
     border: "1px solid var(--border)",
     background: "rgba(255,255,255,0.03)",
     color: "var(--text-muted)",
+    cursor: "text",
+  },
+  searchInput: {
+    flex: 1, minWidth: 0,
+    background: "transparent", border: "none", outline: "none",
+    color: "var(--text-display)",
+    fontFamily: "var(--font-body)", fontSize: 13,
+    letterSpacing: -0.1,
+    padding: 0,
+    // 일부 브라우저의 type=search 기본 X 버튼 제거 (자체 × 사용)
+    WebkitAppearance: "none",
+  },
+  searchClear: {
+    width: 18, height: 18, borderRadius: 3,
+    background: "transparent", border: "none",
+    color: "var(--text-muted)", cursor: "pointer",
+    fontSize: 14, lineHeight: 1, padding: 0,
+    display: "flex", alignItems: "center", justifyContent: "center",
+    flexShrink: 0,
   },
   filterBtn: {
     display: "flex", alignItems: "center", gap: 6,
