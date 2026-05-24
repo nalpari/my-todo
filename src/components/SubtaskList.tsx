@@ -41,6 +41,13 @@ const SubtaskItem = ({ subtask }: { subtask: Subtask }) => {
   const [isEditing, setIsEditing] = useState(false);
   const [editValue, setEditValue] = useState(subtask.title);
 
+  // 외부 변경 흡수 — TaskRow/TimelineCard 와 동일 render-during-render 패턴.
+  const [lastSeenTitle, setLastSeenTitle] = useState(subtask.title);
+  if (subtask.title !== lastSeenTitle) {
+    setLastSeenTitle(subtask.title);
+    if (!isEditing) setEditValue(subtask.title);
+  }
+
   const handleBlur = () => {
     setIsEditing(false);
     const next = editValue.trim().replace(/\s+/g, " ");

@@ -54,6 +54,16 @@ export const TaskRow = ({
   const [hovered, setHovered] = useState(false);
   const [expanded, setExpanded] = useState(false);
 
+  // 외부에서 task.title 이 바뀌면 (낙관 reducer / revalidate / 다른 surface 의 변경)
+  // editValue 도 동기화. render-during-render 패턴 — useEffect + setState 의 cascade
+  // 경고를 피하면서 React 19 가 같은 render pass 안에서 새 값을 흡수한다.
+  // 편집 중이면 사용자의 입력을 덮어쓰지 않게 prev 만 추적.
+  const [lastSeenTitle, setLastSeenTitle] = useState(task.title);
+  if (task.title !== lastSeenTitle) {
+    setLastSeenTitle(task.title);
+    if (!isEditing) setEditValue(task.title);
+  }
+
   // 0 subtasks 일 때도 expand 가능 — affordance 클릭 시 펼침 + SubtaskList 입력 노출.
   // SubtaskMeter 와 affordance 가 같은 토글 함수 공유.
   const toggleExpand = () => setExpanded((v) => !v);
