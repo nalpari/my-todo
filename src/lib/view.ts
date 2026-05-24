@@ -10,7 +10,7 @@
  *  - 프로젝트 동일 항목 재클릭 → project 키 제거 → 필터 해제
  */
 
-import { type Task } from "@/lib/data";
+import { type Project, type Task } from "@/lib/data";
 
 export const VIEW_KEYS = ["today", "upcoming", "inbox", "someday", "done"] as const;
 export type ViewKey = (typeof VIEW_KEYS)[number];
@@ -99,6 +99,34 @@ export function filterTasks(
     if (!isTaskInView(t, view)) return false;
     if (projectId && t.project !== projectId) return false;
     return true;
+  });
+}
+
+/**
+ * 검색어로 추가 필터 — title 과 task 의 project name 양쪽에 case-insensitive
+ * substring 매칭. 빈/공백-only 쿼리는 원본 그대로 반환 (no-op).
+ *
+ * project name 조회를 위해 projects 배열을 받지만, projectId → name 룩업은
+ * Map 으로 1회 수행해 N*M 비용을 N+M 으로 줄인다.
+ */
+export function filterBySearch(
+  tasks: Task[],
+  query: string,
+  projects: Project[],
+): Task[] {
+  const q = query.trim().toLowerCase();
+  if (!q) return tasks;
+
+  const projectNameById = new Map<string, string>();
+  for (const p of projects) projectNameById.set(p.id, p.name.toLowerCase());
+
+  return tasks.filter((t) => {
+    if (t.title.toLowerCase().includes(q)) return true;
+    if (t.project) {
+      const name = projectNameById.get(t.project);
+      if (name && name.includes(q)) return true;
+    }
+    return false;
   });
 }
 

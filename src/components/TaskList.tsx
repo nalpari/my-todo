@@ -12,20 +12,25 @@ import { type ViewKey, sortTasksForView, viewEmptyMessage } from "@/lib/view";
  *
  *  - upcoming: 일별 헤더로 그룹핑 (tomorrow, day3..day7 순서, 비어있는 날은 생략)
  *  - inbox / someday / done: 평면 리스트 (구분선 없음)
+ *
+ * emptyOverride: 빈 상태일 때 뷰별 메시지 대신 사용할 메시지. 검색 활성 시
+ * VariantBSplitInner 가 "검색 결과가 없습니다" 등을 전달.
  */
 export const TaskList = ({
   tasks,
   view,
   today,
+  emptyOverride,
 }: {
   tasks: Task[];
   view: ViewKey;
   today: Date;
+  emptyOverride?: { primary: string; mono?: string };
 }) => {
   const sorted = sortTasksForView(tasks, view);
 
   if (sorted.length === 0) {
-    const empty = viewEmptyMessage(view);
+    const empty = emptyOverride ?? viewEmptyMessage(view);
     return <EmptyState primary={empty.primary} mono={empty.mono} />;
   }
 
@@ -113,9 +118,10 @@ const DaySeparator = ({
   );
 };
 
-/* ─── EmptyState ─────────────────────────────────────────── */
-
-const EmptyState = ({ primary, mono }: { primary: string; mono?: string }) => (
+/* ─── EmptyState ───────────────────────────────────────────
+ * VariantBSplit 의 TodayTimeline 도 검색 빈 결과 시 동일한 빈 상태를 쓰므로 export.
+ */
+export const EmptyState = ({ primary, mono }: { primary: string; mono?: string }) => (
   <div style={S.empty}>
     <div style={S.emptyPrimary}>{primary}</div>
     {mono && (
