@@ -30,6 +30,11 @@ export function parseProjectId(value: string | null | undefined): string | null 
   return UUID_RE.test(value) ? value : null;
 }
 
+export function parseTagId(value: string | null | undefined): string | null {
+  if (!value) return null;
+  return UUID_RE.test(value) ? value : null;
+}
+
 /* ─── 토글 href 빌더 ──────────────────────────────────────── */
 
 /**
@@ -55,7 +60,7 @@ export function toggleViewHref(searchParams: URLSearchParams, target: ViewKey): 
 
 /**
  * 프로젝트 row 클릭 시 호출. 현재 project 와 동일하면 키 제거 (필터 해제),
- * 다르면 설정. view 키는 보존.
+ * 다르면 설정. view·tag 키는 보존.
  */
 export function toggleProjectHref(searchParams: URLSearchParams, projectId: string): string {
   const current = parseProjectId(searchParams.get("project"));
@@ -64,6 +69,22 @@ export function toggleProjectHref(searchParams: URLSearchParams, projectId: stri
     next.delete("project");
   } else {
     next.set("project", projectId);
+  }
+  const qs = next.toString();
+  return qs ? `/?${qs}` : "/";
+}
+
+/**
+ * 태그 chip 클릭 시 호출. project 와 동일 패턴 — 재클릭 해제, view·project 보존.
+ * 단일 선택 (multi-tag 필터는 1차 제외).
+ */
+export function toggleTagHref(searchParams: URLSearchParams, tagId: string): string {
+  const current = parseTagId(searchParams.get("tag"));
+  const next = new URLSearchParams(searchParams);
+  if (current === tagId) {
+    next.delete("tag");
+  } else {
+    next.set("tag", tagId);
   }
   const qs = next.toString();
   return qs ? `/?${qs}` : "/";
@@ -94,10 +115,12 @@ export function filterTasks(
   tasks: Task[],
   view: ViewKey,
   projectId: string | null,
+  tagId: string | null = null,
 ): Task[] {
   return tasks.filter((t) => {
     if (!isTaskInView(t, view)) return false;
     if (projectId && t.project !== projectId) return false;
+    if (tagId && !t.tags.includes(tagId)) return false;
     return true;
   });
 }
