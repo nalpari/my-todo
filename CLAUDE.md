@@ -162,7 +162,19 @@ URL state: `/?view=today&project=<uuid>&tag=<uuid>`. `view` 기본값은 `today`
 
 레이아웃 분기: `view === "today"` → 기존 hour-timeline (분리된 `<TodayTimeline />` 서브컴포넌트), 그 외 → `<TaskList />`. 우측 rail (미니 캘린더 / 다가오는 일정 / 진행률 / 분포) 은 뷰·필터와 독립된 peripheral view 라 전역 `allTasks` 사용 — 의도된 컨텍스트 일관성.
 
-사이드바 nav 카운트는 **모든 필터 (프로젝트·태그) 를 무시한 전역 카운트** — 다른 뷰의 전체 task 가 몇 개인지 보여야 의미. "지금 보고 있는 뷰 + 필터 결과 수" 는 TopBar subtitle 이 담당 (`{context} · N tasks · {projectName?} · #{tagName?}`).
+사이드바 nav 카운트는 **모든 필터 (프로젝트·태그) 를 무시한 전역 카운트** — 다른 뷰의 전체 task 가 몇 개인지 보여야 의미. "지금 보고 있는 뷰 + 필터 결과 수" 는 TopBar subtitle 이 담당 (`{context} · N tasks`). 활성 필터의 식별은 TopBar 의 인라인 chips (project / tag) 와 search input 자체가 노출 — chip × 한 번으로 해당 차원만 해제.
+
+## InputBar 의 컨텍스트 추론
+
+`<InputBar />` 는 현재 view·activeProjectId 를 받아 새 task 의 기본 due_date 와 project_id 를 prefill:
+
+- view=today/done → due_date = 오늘
+- view=upcoming → 내일
+- view=inbox → null
+- view=someday → 오늘 + 8일
+- activeProjectId 있으면 project_id 자동 할당
+
+input 우측의 due 칩 라벨도 뷰별로 변경 (`오늘` / `내일` / `미할당` / `나중에`). 즉 "예정" 뷰에서 task 를 추가하면 자연스럽게 내일로, 프로젝트 X 필터 중 추가하면 X 에 속한다.
 
 ## 서브태스크 (Subtasks)
 
@@ -186,10 +198,8 @@ TopBar 의 검색 input 은 controlled 입력. state 와 `⌘K`/`Ctrl+K` 전역 
 
 - Variants A and C — deferred.
 - A test framework.
-- 필터 칩 (TopBar `필터 · 2` hardcoded label 동적화)
 - 태그 rename / hue 변경 UI (현재 삭제 + 재생성으로 갈음)
 - multi-tag 필터 (현재 단일 선택)
-- InputBar 의 view-aware due_date 기본값 (예정 → 내일, 인박스 → null 등)
 - 검색의 cross-view discovery 힌트 (현재 뷰 빈 결과시 "다른 뷰에서 N개 발견" 링크)
 - 검색어 매칭 부분 강조 (1차에선 단순 필터만)
 
