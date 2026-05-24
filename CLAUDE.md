@@ -97,7 +97,7 @@ Google OAuth 활성화 + 할 일 CRUD 구현 완료.
 
 ## DB 스키마 (CRUD 구현)
 
-DB 마이그레이션 SQL: `supabase/migrations/` (현재 `001_initial_schema.sql`, `002_rls_with_check.sql`, `003_tenant_isolation.sql`, `004_projects_uniqueness.sql`, `005_tags_uniqueness.sql`). 원격 적용은 Supabase MCP `apply_migration` 또는 Dashboard SQL Editor 사용. 002 는 001 의 UPDATE 정책에 `WITH CHECK` 를 추가해 소유권 이전 (`user_id` 변경) 공격을 막고, 003 은 외래키 차원의 cross-tenant 참조를 차단한다 (`tasks(project_id, user_id) → projects(id, user_id)` 복합 FK, `task_tags` 에 `user_id` 추가 후 task·tag 양쪽에 복합 FK, `due_time` HH:MM CHECK 제약). 004/005 는 각각 `projects`/`tags` 에 `(user_id, name) UNIQUE` 제약 — 같은 사용자 내 동명 항목 차단, 위반 시 `23505` → 서버 액션이 "이미 사용 중인 이름입니다" 로 변환.
+DB 마이그레이션 SQL: `supabase/migrations/` (현재 `001_initial_schema.sql`, `002_rls_with_check.sql`, `003_tenant_isolation.sql`, `004_projects_uniqueness.sql`, `005_tags_uniqueness.sql`, `006_subtasks.sql`). 원격 적용은 Supabase MCP `apply_migration` 또는 Dashboard SQL Editor 사용. 002 는 001 의 UPDATE 정책에 `WITH CHECK` 를 추가해 소유권 이전 (`user_id` 변경) 공격을 막고, 003 은 외래키 차원의 cross-tenant 참조를 차단한다 (`tasks(project_id, user_id) → projects(id, user_id)` 복합 FK, `task_tags` 에 `user_id` 추가 후 task·tag 양쪽에 복합 FK, `due_time` HH:MM CHECK 제약). 004/005 는 각각 `projects`/`tags` 에 `(user_id, name) UNIQUE` 제약 — 같은 사용자 내 동명 항목 차단, 위반 시 `23505` → 서버 액션이 "이미 사용 중인 이름입니다" 로 변환. 006 은 `subtasks` 테이블 (복합 FK + RLS) + `recalc_task_subtask_counts` 트리거를 추가해 `tasks.subtotal/subdone` 의 자동 정합성을 DB 레벨에서 보장.
 
 ### 테이블 구조
 
@@ -105,8 +105,9 @@ DB 마이그레이션 SQL: `supabase/migrations/` (현재 `001_initial_schema.sq
 |--------|------|
 | `public.projects` | 프로젝트 (user_id FK, name, color) |
 | `public.tags` | 태그 (user_id FK, name, hue: "accent"\|"muted") |
-| `public.tasks` | 할 일 (user_id FK, project_id FK, title, due_date DATE, due_time TEXT, done, subtotal, subdone, sort_order) |
+| `public.tasks` | 할 일 (user_id FK, project_id FK, title, due_date DATE, due_time TEXT, done, subtotal, subdone, sort_order). subtotal/subdone 은 트리거가 자동 유지 |
 | `public.task_tags` | N:M 조인 (task_id, tag_id) |
+| `public.subtasks` | 서브태스크 (task_id FK 복합, user_id FK, title, done, sort_order). ON DELETE CASCADE 로 부모 task 삭제 시 함께 제거 |
 
 모든 테이블에 RLS 활성화. `auth.uid() = user_id` 기반으로 사용자별 격리.
 
@@ -115,17 +116,19 @@ DB 마이그레이션 SQL: `supabase/migrations/` (현재 `001_initial_schema.sq
 | 파일 | 역할 |
 |------|------|
 | `src/lib/data.ts` | 타입 정의 (ProjectRow, TaskRow, Project, Tag, Task, **BucketKey** — `inbox` (due_date null) 와 `later` (today+7 너머) 분리), 날짜 유틸 (toISODate, dateToBucket, buildWeek, buildDayBuckets, rowToTask). Task 에 created_at/updated_at 포함 (TaskList 정렬용) |
-| `src/lib/queries.ts` | RSC 서버에서 DB fetch (getProjects, getTags, getTasks, getAppData) |
+| `src/lib/queries.ts` | RSC 서버에서 DB fetch (getProjects, getTags, getTasks, getSubtasks, getAppData) |
 | `src/lib/palette.ts` | 프로젝트 색 팔레트 (`PROJECT_COLORS` 8색, `DEFAULT_PROJECT_COLOR`, `isProjectColor` 런타임 가드) — Server Action 검증과 사이드바 swatch picker 가 공유 |
 | `src/lib/view.ts` | 사이드바 view 라우팅 + 프로젝트·태그 필터 + 검색의 URL 직렬화·필터·정렬·라벨 헬퍼. `ViewKey`, `parseView`/`parseProjectId`/`parseTagId`, `toggleViewHref`/`toggleProjectHref`/`toggleTagHref` (동일 항목 재클릭 시 키 제거), `filterTasks(tasks, view, projectId, tagId)` (모두 AND), `filterBySearch` (title + project name case-insensitive substring), `sortTasksForView`, `viewTitle`/`viewSubtitleContext`/`viewEmptyMessage` |
-| `src/lib/AppContext.tsx` | Client 컨텍스트. `useOptimistic` reducer 가 task·project·tag 변이를 통합 관리 (task.toggle/delete/updateTitle + project.create/update/delete + tag.create/delete/assign/unassign). `project.delete` 는 소속 task 의 `project` 필드를 null 로 cascade, `tag.delete` 는 모든 task 의 `tags` 배열에서 해당 id 제거 cascade — DB 의 ON DELETE SET NULL / CASCADE 와 동일 결과 |
+| `src/lib/AppContext.tsx` | Client 컨텍스트. `useOptimistic` reducer 가 task·project·tag·subtask 변이를 통합 관리. cascade 미러: `project.delete` → 소속 task.project=null / `tag.delete` → 모든 task.tags 에서 제거 / `task.delete` → 소속 subtasks 제거 / `subtask.create|toggle|delete` → 부모 task 의 subtotal/subdone 동기 갱신 (DB 트리거 결과 미러) |
 | `src/app/tasks/actions.ts` | Server Actions (createTask, toggleTask, updateTask, deleteTask) + `revalidatePath("/")` |
 | `src/app/projects/actions.ts` | Server Actions (createProject, updateProject, deleteProject). 동일 컨벤션 + `parseName` (trim·연속공백→1개·1-50자) + `parseColor` (`isProjectColor` enum 가드) + 23505 캐치 |
 | `src/app/tags/actions.ts` | Server Actions (createTag, deleteTag, assignTag, unassignTag). `parseName` (1-30자, project 보다 짧음) + `parseHue` (accent\|muted enum). assignTag 는 (task_id, tag_id) UNIQUE 위반 시 멱등 처리 (이미 할당된 상태로 간주, 성공 반환) |
+| `src/app/subtasks/actions.ts` | Server Actions (createSubtask, updateSubtask, deleteSubtask). 동일 컨벤션 + `parseTitle` (1-200자). updateSubtask 는 fields 화이트리스트 (title / done 만). subtotal/subdone 의 정합성은 DB 트리거가 담당 — action 코드는 subtasks 만 다룸 |
 | `src/components/ProjectList.tsx` | 사이드바 프로젝트 섹션 UI. ProjectRow 는 **이름 클릭 = 필터 토글** (URL `project` 키), 호버 ✎ = 인라인 편집 (blur=save, Esc=cancel), 색 dot = swatch popover, 호버 × = 2단계 삭제 (`정말? · N개 해제`). 활성 시 row 좌측 코랄 인디케이터 + bg 강조. NewProjectRow 는 `+` 버튼으로 펼침, 색 dot/swatch mousedown `preventDefault` 로 input focus 유지 |
 | `src/components/TagList.tsx` | 사이드바 태그 섹션 UI. SidebarTagChip 은 **클릭 = 필터 토글** (URL `tag` 키), 호버 chip → 우상단 × overlay → 2단계 확인 ("정말?" 텍스트 교체) → 삭제. NewTagRow 는 `+` 로 펼침, hue 라디오 (accent/muted) + 이름 input. rename/hue 변경 UI 없음 — 삭제 + 재생성으로 갈음 |
 | `src/components/TaskList.tsx` | 비-오늘 뷰의 중앙 컨텐츠. `upcoming` 은 일별 헤더로 그룹핑 (비어있는 날 생략), `inbox`/`someday`/`done` 은 평면 리스트. 정렬은 `sortTasksForView`. 빈 상태 메시지 뷰별, `emptyOverride` prop 으로 검색 등 외부 컨텍스트 메시지 주입 가능. 재사용 가능한 `<EmptyState />` export (TodayTimeline 도 사용) |
 | `src/components/TaskTagsEditor.tsx` | Task 의 태그 chips + 편집 컨트롤 공유 컴포넌트 (TaskRow editorial/card, TimelineCard 가 사용). `active=true` → 각 chip × overlay (unassign) + 마지막에 "+" 버튼. "+" 클릭 → 사용자의 모든 태그 popover, 클릭으로 toggle. chip × 가시성과 picker 가시성은 분리 (picker 열린 채 hover 떠도 picker 유지) |
+| `src/components/SubtaskList.tsx` | Task 의 펼침 영역 — 작은 checkbox + 제목 인라인 편집 + 호버 ×. NewSubtaskInput 은 항상 맨 아래 + 입력, Enter 후 포커스 유지 (연속 추가 편의), Esc clear. 2단계 확인 없음 — subtask 는 throwaway. TaskRow editorial/card 와 TimelineCard 가 공유 |
 
 ### CRUD 흐름
 
@@ -161,6 +164,14 @@ URL state: `/?view=today&project=<uuid>&tag=<uuid>`. `view` 기본값은 `today`
 
 사이드바 nav 카운트는 **모든 필터 (프로젝트·태그) 를 무시한 전역 카운트** — 다른 뷰의 전체 task 가 몇 개인지 보여야 의미. "지금 보고 있는 뷰 + 필터 결과 수" 는 TopBar subtitle 이 담당 (`{context} · N tasks · {projectName?} · #{tagName?}`).
 
+## 서브태스크 (Subtasks)
+
+`subtasks` 테이블은 별도. tasks 테이블의 `subtotal`/`subdone` 컬럼은 그대로 두되 `recalc_task_subtask_counts` 트리거 (006) 가 subtasks 의 INSERT/UPDATE/DELETE 시 자동 재계산 — DB 가 정합성 보증. 따라서 server action 은 subtasks 만 다룬다.
+
+UI 는 **expand-in-place**: TaskRow editorial/card 와 TimelineCard 의 `SubtaskMeter` 가 클릭 가능한 chevron 토글로 작동. 펼쳐지면 본문 아래에 `<SubtaskList />` 렌더. 0 subtasks 인 task 는 호버 시 `+ 서브태스크` affordance 가 메타데이터 줄에 등장 — 클릭하면 expand. expand state 는 컴포넌트 local (URL X, 뷰 전환 시 리셋).
+
+낙관 reducer 의 subtask 케이스는 부모 task 의 subtotal/subdone 도 함께 갱신 — DB 트리거 결과의 미러. revalidate 가 동일 값을 다시 가져오므로 reconcile 충돌 없음.
+
 ## 검색 (TopBar)
 
 TopBar 의 검색 input 은 controlled 입력. state 와 `⌘K`/`Ctrl+K` 전역 단축키는 `VariantBSplitInner` 가 소유. AppTopBar 는 `searchQuery`/`onSearchChange`/`searchInputRef` props 만 받는 순수 view.
@@ -175,7 +186,6 @@ TopBar 의 검색 input 은 controlled 입력. state 와 `⌘K`/`Ctrl+K` 전역 
 
 - Variants A and C — deferred.
 - A test framework.
-- 서브태스크 CRUD (subtotal/subdone 은 표시만)
 - 필터 칩 (TopBar `필터 · 2` hardcoded label 동적화)
 - 태그 rename / hue 변경 UI (현재 삭제 + 재생성으로 갈음)
 - multi-tag 필터 (현재 단일 선택)
