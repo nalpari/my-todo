@@ -2,20 +2,28 @@
 
 import type { CSSProperties } from "react";
 import { useEffect, useRef, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useApp } from "@/lib/AppContext";
 import { MonoLabel } from "./Primitives";
 import { PROJECT_COLORS, DEFAULT_PROJECT_COLOR } from "@/lib/palette";
 import { type Project } from "@/lib/data";
+import { parseProjectId, toggleProjectHref } from "@/lib/view";
 
 /* ─── ProjectList ────────────────────────────────────────────
  * 사이드바의 프로젝트 섹션 전체. AppShell 에서 import.
  *
  * 헤더 + 버튼 → isCreating 토글 → 리스트 맨 아래에 NewProjectRow 펼침.
- * 각 ProjectRow 는 이름 인라인 편집, 색 swatch popover, 호버 × 2단계 삭제.
+ * 각 ProjectRow 는:
+ *  - 이름 클릭 = URL project 필터 토글 (Round 2 view 라우팅)
+ *  - 호버 ✎ = 인라인 이름 편집
+ *  - 색 닷 = swatch popover
+ *  - 호버 × = 2단계 삭제 확인
  * 모든 변이는 AppContext 의 낙관 reducer 를 통해 즉시 반영.
  */
 export const ProjectList = () => {
   const { projects } = useApp();
+  const searchParams = useSearchParams();
+  const activeProjectId = parseProjectId(searchParams.get("project"));
   const [isCreating, setIsCreating] = useState(false);
 
   return (
@@ -33,7 +41,7 @@ export const ProjectList = () => {
       </div>
       <ul style={S.list}>
         {projects.map((p) => (
-          <ProjectRow key={p.id} project={p} />
+          <ProjectRow key={p.id} project={p} isActive={p.id === activeProjectId} />
         ))}
         {isCreating && <NewProjectRow onDone={() => setIsCreating(false)} />}
       </ul>
@@ -45,8 +53,10 @@ export const ProjectList = () => {
 
 type EditMode = "name" | "color" | null;
 
-const ProjectRow = ({ project }: { project: Project }) => {
+const ProjectRow = ({ project, isActive }: { project: Project; isActive: boolean }) => {
   const { tasks, updateProject, deleteProject } = useApp();
+  const router = useRouter();
+  const searchParams = useSearchParams();
   const [edit, setEdit] = useState<EditMode>(null);
   const [nameValue, setNameValue] = useState(project.name);
   const [hovered, setHovered] = useState(false);
@@ -103,22 +113,32 @@ const ProjectRow = ({ project }: { project: Project }) => {
     setConfirming(true);
   };
 
+  // 이름 클릭 = 프로젝트 필터 토글 (Round 2 Q4-g, ProjectRow 클릭 충돌 결정 = A).
+  // 활성 상태에서 다시 클릭하면 URL 의 project 키 제거 → 필터 해제.
+  const handleFilterToggle = () => {
+    router.replace(toggleProjectHref(new URLSearchParams(searchParams.toString()), project.id), { scroll: false });
+  };
+
   // 삭제 확인 메시지의 "N개 해제" 카운트 — 낙관 tasks 기준.
   const affectedCount = tasks.filter((t) => t.project === project.id).length;
 
   return (
     <li
       ref={rowRef}
-      style={S.row}
+      style={{
+        ...S.row,
+        ...(isActive ? S.rowActive : {}),
+      }}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
     >
+      {/* 활성 인디케이터 — row 좌측 끝에 작은 코랄 막대 */}
+      {isActive && <span aria-hidden="true" style={S.activeIndicator} />}
+
       {/* 색 닷 — 클릭 시 swatch popover */}
       <button
         type="button"
         aria-label="색 변경"
-        // input 에 포커스가 있는 상태에서 dot 을 눌러도 input 의 blur 가 먼저 fire 되며
-        // commitName 이 실행됨 — 이름 변경 + 색 popover 가 같이 일어나는 자연스러운 동작.
         onClick={() => setEdit(edit === "color" ? null : "color")}
         style={{
           ...S.dotBtn,
@@ -132,7 +152,7 @@ const ProjectRow = ({ project }: { project: Project }) => {
         <SwatchPopover selected={project.color} onPick={pickColor} />
       )}
 
-      {/* 이름 — 클릭 시 인라인 편집 */}
+      {/* 이름 — 클릭 = 필터 토글 / ✎ 클릭 = 편집 모드 */}
       {edit === "name" ? (
         <input
           autoFocus
@@ -151,19 +171,33 @@ const ProjectRow = ({ project }: { project: Project }) => {
         />
       ) : (
         <span
-          style={S.name}
-          onClick={() => {
-            setNameValue(project.name);
-            setEdit("name");
-          }}
+          style={{ ...S.name, ...(isActive ? S.nameActive : {}) }}
+          onClick={handleFilterToggle}
+          title={isActive ? "필터 해제" : `프로젝트 '${project.name}' 만 보기`}
         >
           {project.name}
         </span>
       )}
 
-      {/* count — 호버하지 않을 때만. 호버 시 삭제 버튼이 자리를 차지 */}
+      {/* count — 호버하지 않을 때만. 호버 시 ✎/× 버튼이 자리를 차지 */}
       {!hovered && !confirming && (
         <span style={S.count}>{project.count}</span>
+      )}
+
+      {/* 편집 ✎ — 호버 시 등장 (삭제 확인 중에는 숨김) */}
+      {hovered && !confirming && (
+        <button
+          type="button"
+          onClick={() => {
+            setNameValue(project.name);
+            setEdit("name");
+          }}
+          aria-label="이름 변경"
+          title="이름 변경"
+          style={S.editBtn}
+        >
+          ✎
+        </button>
       )}
 
       {/* 삭제 — 호버 시 등장, 2단계 확인 */}
@@ -297,6 +331,18 @@ const S: Record<string, CSSProperties> = {
     padding: "6px 10px", borderRadius: "var(--radius-sm)",
     fontSize: 13, color: "var(--text-secondary)",
   },
+  rowActive: {
+    background: "rgba(255,255,255,0.04)",
+  },
+  activeIndicator: {
+    position: "absolute",
+    left: 0, top: "50%",
+    width: 2, height: 14,
+    transform: "translateY(-50%)",
+    background: "var(--accent)",
+    borderRadius: 1,
+    boxShadow: "0 0 6px var(--accent)",
+  },
   dotBtn: {
     borderRadius: 2,
     border: "none", padding: 0, cursor: "pointer",
@@ -307,7 +353,11 @@ const S: Record<string, CSSProperties> = {
     flex: 1, minWidth: 0,
     letterSpacing: -0.1,
     overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
-    cursor: "text",
+    cursor: "pointer",
+  },
+  nameActive: {
+    color: "var(--text-display)",
+    fontWeight: 500,
   },
   nameInput: {
     flex: 1, minWidth: 0,
@@ -317,6 +367,16 @@ const S: Record<string, CSSProperties> = {
     letterSpacing: -0.1, padding: 0,
   },
   count: { fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--text-faint)" },
+  editBtn: {
+    width: 20, height: 20,
+    borderRadius: 4,
+    background: "transparent",
+    border: "1px solid var(--border)",
+    color: "var(--text-muted)",
+    fontSize: 11, lineHeight: 1, cursor: "pointer",
+    display: "flex", alignItems: "center", justifyContent: "center",
+    padding: 0,
+  },
   deleteBtn: {
     height: 20, padding: "0 6px",
     borderRadius: 4,
