@@ -9,7 +9,8 @@ import { createMutableClient } from "@/lib/supabase/server";
  * 갱신은 DB 트리거가 담당 (006 마이그레이션) — server action 은 subtasks 만 다룸.
  *
  * client UUID 발급 + 낙관 UI 가 즉시 동일 id 사용. 003 의 복합 FK 가 cross-tenant
- * 참조를 차단하므로 task 소유권 사전 검증은 생략 (FK 위반 시 명확한 에러 발생).
+ * 참조를 DB 레벨에서 차단하지만, FK 위반 raw 메시지 대신 명확한 에러 UX 를
+ * 위해 createSubtask 는 assertOwnedTask 로 부모 task 소유권을 사전 검증한다.
  */
 async function requireUser() {
   const supabase = await createMutableClient();
@@ -38,6 +39,31 @@ function parseTitle(raw: unknown): string {
   return normalized;
 }
 
+function translateDbError(prefix: string, error: { code?: string; message: string }): Error {
+  if (error.code === "23503") return new Error("참조 대상을 찾을 수 없습니다");
+  return new Error(`${prefix}: ${error.message}`);
+}
+
+/**
+ * 부모 task 가 인증된 사용자 소유인지 사전 검증.
+ * DB 의 복합 FK (003) 가 cross-tenant 참조를 거부하지만, raw FK 위반 메시지
+ * 대신 명확한 한국어 에러를 노출하기 위해 한 번 더 확인한다.
+ */
+async function assertOwnedTask(
+  supabase: Awaited<ReturnType<typeof createMutableClient>>,
+  taskId: string,
+  userId: string,
+) {
+  const { data, error } = await supabase
+    .from("tasks")
+    .select("id")
+    .eq("id", taskId)
+    .eq("user_id", userId)
+    .maybeSingle();
+  if (error) throw new Error(`task 검증 실패: ${error.message}`);
+  if (!data) throw new Error("해당 task 를 찾을 수 없습니다");
+}
+
 /* ─── createSubtask ─────────────────────────────────────── */
 
 export async function createSubtask(id: string, taskId: string, title: string) {
@@ -47,6 +73,8 @@ export async function createSubtask(id: string, taskId: string, title: string) {
 
   const { supabase, user } = await requireUser();
 
+  await assertOwnedTask(supabase, parentTaskId, user.id);
+
   const { error } = await supabase.from("subtasks").insert({
     id: subtaskId,
     task_id: parentTaskId,
@@ -54,7 +82,7 @@ export async function createSubtask(id: string, taskId: string, title: string) {
     title: cleanTitle,
   });
 
-  if (error) throw new Error(`서브태스크 생성 실패: ${error.message}`);
+  if (error) throw translateDbError("서브태스크 생성 실패", error);
 
   revalidatePath("/");
 }
