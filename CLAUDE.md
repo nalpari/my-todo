@@ -117,12 +117,12 @@ DB 마이그레이션 SQL: `supabase/migrations/` (현재 `001_initial_schema.sq
 | `src/lib/data.ts` | 타입 정의 (ProjectRow, TaskRow, Project, Tag, Task, **BucketKey** — `inbox` (due_date null) 와 `later` (today+7 너머) 분리), 날짜 유틸 (toISODate, dateToBucket, buildWeek, buildDayBuckets, rowToTask). Task 에 created_at/updated_at 포함 (TaskList 정렬용) |
 | `src/lib/queries.ts` | RSC 서버에서 DB fetch (getProjects, getTags, getTasks, getAppData) |
 | `src/lib/palette.ts` | 프로젝트 색 팔레트 (`PROJECT_COLORS` 8색, `DEFAULT_PROJECT_COLOR`, `isProjectColor` 런타임 가드) — Server Action 검증과 사이드바 swatch picker 가 공유 |
-| `src/lib/view.ts` | 사이드바 view 라우팅 + 프로젝트 필터의 URL 직렬화·필터·정렬·라벨 헬퍼. `ViewKey`, `parseView`/`parseProjectId`, `toggleViewHref`/`toggleProjectHref` (동일 항목 재클릭 시 키 제거), `filterTasks` (view+project AND), `sortTasksForView`, `viewTitle`/`viewSubtitleContext`/`viewEmptyMessage` |
+| `src/lib/view.ts` | 사이드바 view 라우팅 + 프로젝트 필터 + 검색의 URL 직렬화·필터·정렬·라벨 헬퍼. `ViewKey`, `parseView`/`parseProjectId`, `toggleViewHref`/`toggleProjectHref` (동일 항목 재클릭 시 키 제거), `filterTasks` (view+project AND), `filterBySearch` (title + project name case-insensitive substring), `sortTasksForView`, `viewTitle`/`viewSubtitleContext`/`viewEmptyMessage` |
 | `src/lib/AppContext.tsx` | Client 컨텍스트. `useOptimistic` reducer 가 task 와 project 변이를 함께 관리 (task.toggle/delete/updateTitle + project.create/update/delete). `project.delete` 는 소속 task 의 `project` 필드를 null 로 cascade 해 DB 의 ON DELETE SET NULL 과 일치 |
 | `src/app/tasks/actions.ts` | Server Actions (createTask, toggleTask, updateTask, deleteTask) + `revalidatePath("/")` |
 | `src/app/projects/actions.ts` | Server Actions (createProject, updateProject, deleteProject). 동일 컨벤션 + `parseName` (trim·연속공백→1개·1-50자) + `parseColor` (`isProjectColor` enum 가드) + 23505 캐치 |
 | `src/components/ProjectList.tsx` | 사이드바 프로젝트 섹션 UI. ProjectRow 는 **이름 클릭 = 필터 토글** (URL `project` 키), 호버 ✎ = 인라인 편집 (blur=save, Esc=cancel), 색 dot = swatch popover, 호버 × = 2단계 삭제 (`정말? · N개 해제`). 활성 시 row 좌측 코랄 인디케이터 + bg 강조. NewProjectRow 는 `+` 버튼으로 펼침, 색 dot/swatch mousedown `preventDefault` 로 input focus 유지 |
-| `src/components/TaskList.tsx` | 비-오늘 뷰의 중앙 컨텐츠. `upcoming` 은 일별 헤더로 그룹핑 (비어있는 날 생략), `inbox`/`someday`/`done` 은 평면 리스트. 정렬은 `sortTasksForView`. 빈 상태 메시지 뷰별 |
+| `src/components/TaskList.tsx` | 비-오늘 뷰의 중앙 컨텐츠. `upcoming` 은 일별 헤더로 그룹핑 (비어있는 날 생략), `inbox`/`someday`/`done` 은 평면 리스트. 정렬은 `sortTasksForView`. 빈 상태 메시지 뷰별, `emptyOverride` prop 으로 검색 등 외부 컨텍스트 메시지 주입 가능. 재사용 가능한 `<EmptyState />` export (TodayTimeline 도 사용) |
 
 ### CRUD 흐름
 
@@ -158,15 +158,26 @@ URL state: `/?view=today&project=<uuid>`. `view` 기본값은 `today`, 없으면
 
 사이드바 nav 카운트는 **프로젝트 필터를 무시한 전역 카운트** — 다른 뷰의 전체 task 가 몇 개인지 보여야 의미. "지금 보고 있는 뷰 + 필터 결과 수" 는 TopBar subtitle 이 담당 (`{context} · N tasks · {projectName?}`).
 
+## 검색 (TopBar)
+
+TopBar 의 검색 input 은 controlled 입력. state 와 `⌘K`/`Ctrl+K` 전역 단축키는 `VariantBSplitInner` 가 소유. AppTopBar 는 `searchQuery`/`onSearchChange`/`searchInputRef` props 만 받는 순수 view.
+
+- **범위**: task title + project name (case-insensitive substring). 태그·due_date 는 1차 제외.
+- **결합**: 뷰·프로젝트 필터에 AND. 검색은 client-only state — URL 에 넣지 않음 (뷰 전환·새로고침 시 리셋).
+- **키보드**: `⌘K`/`Ctrl+K` → input focus + select. Esc → 검색어 비우고 blur (input 의 onKeyDown 이 처리).
+- **빈 상태**: 검색 활성 + 0 결과면 뷰별 메시지 대신 "검색 결과가 없습니다" + 검색어 mono 라벨. today 뷰에서도 hour grid 대신 EmptyState 분기.
+- **subtitle 표식**: 검색 활성 시 TopBar subtitle 앞에 `검색: "{query}" · ...` 추가.
+
 ## Not in scope (don't add unprompted)
 
 - Variants A and C — deferred.
 - A test framework.
-- 태그 CRUD UI (현재 DB에서 조회만, 추가/삭제 UI 없음)
+- 태그 CRUD UI (현재 DB에서 조회만, 추가/삭제 UI 없음 + task 에 태그 할당 UI 없음)
 - 서브태스크 CRUD (subtotal/subdone 은 표시만)
-- 검색 (TopBar `⌘K` 검색 input 활성화)
 - 필터 칩 (TopBar `필터 · 2` hardcoded label 동적화)
 - InputBar 의 view-aware due_date 기본값 (예정 → 내일, 인박스 → null 등)
+- 검색의 cross-view discovery 힌트 (현재 뷰 빈 결과시 "다른 뷰에서 N개 발견" 링크)
+- 검색어 매칭 부분 강조 (1차에선 단순 필터만)
 
 If a task seems to require any of these, confirm with the user before adding the dependency.
 
