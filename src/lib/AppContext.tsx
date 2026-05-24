@@ -2,11 +2,12 @@
 
 import { createContext, useContext, useOptimistic, useState, startTransition, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
-import { type Project, type Tag, type Task } from "@/lib/data";
+import { type Project, type Subtask, type Tag, type Task } from "@/lib/data";
 import { type AppData } from "@/lib/queries";
 import { toggleTask as toggleTaskAction, deleteTask as deleteTaskAction, updateTask as updateTaskAction } from "@/app/tasks/actions";
 import { createProject as createProjectAction, updateProject as updateProjectAction, deleteProject as deleteProjectAction } from "@/app/projects/actions";
 import { createTag as createTagAction, deleteTag as deleteTagAction, assignTag as assignTagAction, unassignTag as unassignTagAction } from "@/app/tags/actions";
+import { createSubtask as createSubtaskAction, updateSubtask as updateSubtaskAction, deleteSubtask as deleteSubtaskAction } from "@/app/subtasks/actions";
 import { DEFAULT_PROJECT_COLOR } from "@/lib/palette";
 
 /* ─── 컨텍스트 타입 ─────────────────────────────────────────── */
@@ -20,6 +21,7 @@ type AppContextValue = {
   projects: Project[];
   tags: Tag[];
   tasks: Task[];
+  subtasks: Subtask[];
   /** currentDone: 서버에 보낼 새 done 값 계산용 (낙관 reducer 는 자체 toggle) */
   toggleTask: (id: string, currentDone: boolean) => void;
   deleteTask: (id: string) => void;
@@ -35,6 +37,11 @@ type AppContextValue = {
   deleteTag: (id: string) => void;
   assignTag: (taskId: string, tagId: string) => void;
   unassignTag: (taskId: string, tagId: string) => void;
+  /** 새 서브태스크 — id 는 클라이언트가 crypto.randomUUID() 로 미리 발급. */
+  createSubtask: (id: string, taskId: string, title: string) => void;
+  toggleSubtask: (id: string, taskId: string, currentDone: boolean) => void;
+  updateSubtaskTitle: (id: string, title: string) => void;
+  deleteSubtask: (id: string, taskId: string, wasDone: boolean) => void;
   /** 가장 최근 액션 실패. null 이면 토스트 숨김 */
   error: AppError | null;
   /** 외부에서도 에러 띄울 수 있게 노출 (예: InputBar) */
@@ -46,7 +53,7 @@ const AppContext = createContext<AppContextValue | null>(null);
 
 /* ─── 낙관 reducer 의 통합 state 와 액션 타입 ──────────────── */
 
-type OptimisticState = { projects: Project[]; tags: Tag[]; tasks: Task[] };
+type OptimisticState = { projects: Project[]; tags: Tag[]; tasks: Task[]; subtasks: Subtask[] };
 
 type OptimisticAction =
   | { type: "task.toggle"; id: string }
@@ -58,7 +65,11 @@ type OptimisticAction =
   | { type: "tag.create"; tag: Tag }
   | { type: "tag.delete"; id: string }
   | { type: "tag.assign"; taskId: string; tagId: string }
-  | { type: "tag.unassign"; taskId: string; tagId: string };
+  | { type: "tag.unassign"; taskId: string; tagId: string }
+  | { type: "subtask.create"; subtask: Subtask }
+  | { type: "subtask.toggle"; id: string; taskId: string }
+  | { type: "subtask.updateTitle"; id: string; title: string }
+  | { type: "subtask.delete"; id: string; taskId: string; wasDone: boolean };
 
 function reducer(state: OptimisticState, action: OptimisticAction): OptimisticState {
   switch (action.type) {
@@ -68,7 +79,12 @@ function reducer(state: OptimisticState, action: OptimisticAction): OptimisticSt
         tasks: state.tasks.map((t) => (t.id === action.id ? { ...t, done: !t.done } : t)),
       };
     case "task.delete":
-      return { ...state, tasks: state.tasks.filter((t) => t.id !== action.id) };
+      // DB 의 ON DELETE CASCADE 미러 — 해당 task 의 subtasks 도 함께 제거.
+      return {
+        ...state,
+        tasks: state.tasks.filter((t) => t.id !== action.id),
+        subtasks: state.subtasks.filter((s) => s.task_id !== action.id),
+      };
     case "task.updateTitle":
       return {
         ...state,
@@ -121,6 +137,47 @@ function reducer(state: OptimisticState, action: OptimisticAction): OptimisticSt
           t.id === action.taskId ? { ...t, tags: t.tags.filter((id) => id !== action.tagId) } : t,
         ),
       };
+    case "subtask.create":
+      // tasks.subtotal 도 함께 증가 — DB 트리거의 결과 미러.
+      return {
+        ...state,
+        subtasks: [...state.subtasks, action.subtask],
+        tasks: state.tasks.map((t) =>
+          t.id === action.subtask.task_id ? { ...t, subtotal: t.subtotal + 1 } : t,
+        ),
+      };
+    case "subtask.toggle": {
+      const target = state.subtasks.find((s) => s.id === action.id);
+      if (!target) return state;
+      const delta = target.done ? -1 : +1;
+      return {
+        ...state,
+        subtasks: state.subtasks.map((s) =>
+          s.id === action.id ? { ...s, done: !s.done } : s,
+        ),
+        tasks: state.tasks.map((t) =>
+          t.id === action.taskId ? { ...t, subdone: t.subdone + delta } : t,
+        ),
+      };
+    }
+    case "subtask.updateTitle":
+      return {
+        ...state,
+        subtasks: state.subtasks.map((s) =>
+          s.id === action.id ? { ...s, title: action.title } : s,
+        ),
+      };
+    case "subtask.delete":
+      // subtotal 은 항상 -1. subdone 은 wasDone 일 때만 -1.
+      return {
+        ...state,
+        subtasks: state.subtasks.filter((s) => s.id !== action.id),
+        tasks: state.tasks.map((t) =>
+          t.id === action.taskId
+            ? { ...t, subtotal: t.subtotal - 1, subdone: action.wasDone ? t.subdone - 1 : t.subdone }
+            : t,
+        ),
+      };
     default:
       return state;
   }
@@ -133,7 +190,7 @@ export function AppProvider({ appData, children }: { appData: AppData; children:
   const [error, setError] = useState<AppError | null>(null);
 
   const [optimistic, applyOptimistic] = useOptimistic(
-    { projects: appData.projects, tags: appData.tags, tasks: appData.tasks },
+    { projects: appData.projects, tags: appData.tags, tasks: appData.tasks, subtasks: appData.subtasks },
     reducer,
   );
 
@@ -228,6 +285,38 @@ export function AppProvider({ appData, children }: { appData: AppData; children:
     });
   };
 
+  const createSubtask = (id: string, taskId: string, title: string) => {
+    const now = new Date().toISOString();
+    startTransition(() => {
+      applyOptimistic({
+        type: "subtask.create",
+        subtask: { id, task_id: taskId, title, done: false, sort_order: 0, created_at: now },
+      });
+      void runAction(() => createSubtaskAction(id, taskId, title));
+    });
+  };
+
+  const toggleSubtask = (id: string, taskId: string, currentDone: boolean) => {
+    startTransition(() => {
+      applyOptimistic({ type: "subtask.toggle", id, taskId });
+      void runAction(() => updateSubtaskAction(id, { done: !currentDone }));
+    });
+  };
+
+  const updateSubtaskTitle = (id: string, title: string) => {
+    startTransition(() => {
+      applyOptimistic({ type: "subtask.updateTitle", id, title });
+      void runAction(() => updateSubtaskAction(id, { title }));
+    });
+  };
+
+  const deleteSubtask = (id: string, taskId: string, wasDone: boolean) => {
+    startTransition(() => {
+      applyOptimistic({ type: "subtask.delete", id, taskId, wasDone });
+      void runAction(() => deleteSubtaskAction(id));
+    });
+  };
+
   const reportError = (msg: string) => setError({ msg, ts: Date.now() });
   const dismissError = () => setError(null);
 
@@ -237,6 +326,7 @@ export function AppProvider({ appData, children }: { appData: AppData; children:
         projects: optimistic.projects,
         tags: optimistic.tags,
         tasks: optimistic.tasks,
+        subtasks: optimistic.subtasks,
         toggleTask,
         deleteTask,
         updateTaskTitle,
@@ -247,6 +337,10 @@ export function AppProvider({ appData, children }: { appData: AppData; children:
         deleteTag,
         assignTag,
         unassignTag,
+        createSubtask,
+        toggleSubtask,
+        updateSubtaskTitle,
+        deleteSubtask,
         error,
         reportError,
         dismissError,
