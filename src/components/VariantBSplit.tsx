@@ -7,13 +7,14 @@ import { Checkbox, MonoLabel, ProjectDot } from "./Primitives";
 import { AppSidebar, AppTopBar, InputBar, type DisplayUser } from "./AppShell";
 import { MiniCalendar, SubtaskMeter } from "./TaskRow";
 import { TaskList, EmptyState } from "./TaskList";
+import { TaskTagsEditor } from "./TaskTagsEditor";
 import { AppProvider, useApp } from "@/lib/AppContext";
 import { toISODate, type Task } from "@/lib/data";
 import { type AppData } from "@/lib/queries";
-import { TagChip } from "./Primitives";
 import {
   parseView,
   parseProjectId,
+  parseTagId,
   filterTasks,
   filterBySearch,
   viewTitle,
@@ -95,12 +96,14 @@ function useLiveClock() {
 /* ─── 내부 컴포넌트 (AppProvider 안) ─────────────────────────── */
 const VariantBSplitInner = ({ user }: { user: DisplayUser }) => {
   const now = useLiveClock();
-  const { tasks: allTasks, projects } = useApp();
+  const { tasks: allTasks, projects, tags } = useApp();
   const searchParams = useSearchParams();
 
   const view = parseView(searchParams.get("view"));
   const activeProjectId = parseProjectId(searchParams.get("project"));
   const activeProject = activeProjectId ? projects.find((p) => p.id === activeProjectId) ?? null : null;
+  const activeTagId = parseTagId(searchParams.get("tag"));
+  const activeTag = activeTagId ? tags.find((t) => t.id === activeTagId) ?? null : null;
 
   // 검색은 URL 에 넣지 않는 client-only state (Round 3 Q2-e). 뷰 전환·새로고침 시 리셋.
   const [searchQuery, setSearchQuery] = useState("");
@@ -121,10 +124,10 @@ const VariantBSplitInner = ({ user }: { user: DisplayUser }) => {
     return () => document.removeEventListener("keydown", onKey);
   }, []);
 
-  // 필터 체인: view → project → search. 우측 rail 의 다가오는 일정·분포 차트는
-  // 의도적으로 전역 allTasks 사용 — 필터·검색 컨텍스트와 독립된 peripheral view.
+  // 필터 체인: view → project → tag → search. 우측 rail 의 다가오는 일정·분포
+  // 차트는 의도적으로 전역 allTasks 사용 — 필터·검색 컨텍스트와 독립된 peripheral view.
   const visibleTasks = filterBySearch(
-    filterTasks(allTasks, view, activeProjectId),
+    filterTasks(allTasks, view, activeProjectId, activeTagId),
     searchQuery,
     projects,
   );
@@ -132,12 +135,13 @@ const VariantBSplitInner = ({ user }: { user: DisplayUser }) => {
   const today = now;
   const todayISO = toISODate(today);
 
-  // TopBar 라벨 — 검색 활성이면 subtitle 앞에 검색 표식.
+  // TopBar 라벨 — 활성 필터들을 subtitle 끝에 chain append. 검색은 prefix.
   const title = viewTitle(view);
   const subtitleContext = viewSubtitleContext(view, today);
-  const baseSubtitle =
-    `${subtitleContext} · ${visibleTasks.length} tasks` +
-    (activeProject ? ` · ${activeProject.name}` : "");
+  const filterSuffix =
+    (activeProject ? ` · ${activeProject.name}` : "") +
+    (activeTag ? ` · #${activeTag.name}` : "");
+  const baseSubtitle = `${subtitleContext} · ${visibleTasks.length} tasks${filterSuffix}`;
   const subtitle = isSearching ? `검색: "${searchQuery.trim()}" · ${baseSubtitle}` : baseSubtitle;
 
   // 중앙 분기 — 검색 활성 + 0 결과면 EmptyState (뷰별 메시지 부적절).
@@ -456,11 +460,11 @@ const TimelineCard = ({ task }: { task: Task }) => {
     >
       <span style={{ width: 3, alignSelf: "stretch", borderRadius: 2, background: project ? project.color : "var(--text-faint)" }} />
       <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ display: "flex", alignItems: "baseline", gap: 8, marginBottom: 3 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 3, flexWrap: "wrap" }}>
           <span style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--text-muted)", letterSpacing: 0.5 }}>
             {project?.name}
           </span>
-          {task.tags.map((t) => <TagChip key={t} id={t} small />)}
+          <TaskTagsEditor taskId={task.id} tagIds={task.tags} active={hovered} />
         </div>
         {isEditing ? (
           <input

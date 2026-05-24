@@ -57,7 +57,19 @@ export const ProjectDot = ({ id, size = 7 }: { id: string | null; size?: number 
   );
 };
 
-export const TagChip = ({ id, small = false }: { id: string; small?: boolean }) => {
+/**
+ * onRemove 가 전달되면 chip 우상단에 작은 × 가 항상 노출됨 — 호출처가 "지금 편집 모드"
+ * 일 때만 prop 을 넘겨 visibility 를 제어 (TaskRow/TimelineCard 가 호버 상태에 따라 결정).
+ */
+export const TagChip = ({
+  id,
+  small = false,
+  onRemove,
+}: {
+  id: string;
+  small?: boolean;
+  onRemove?: () => void;
+}) => {
   const { tags } = useApp();
   const t = tags.find((tg) => tg.id === id);
   if (!t) return null;
@@ -65,6 +77,7 @@ export const TagChip = ({ id, small = false }: { id: string; small?: boolean }) 
   return (
     <span
       style={{
+        position: "relative",
         display: "inline-flex",
         alignItems: "center",
         padding: small ? "1px 7px" : "2px 8px",
@@ -79,6 +92,30 @@ export const TagChip = ({ id, small = false }: { id: string; small?: boolean }) 
       }}
     >
       {t.name}
+      {onRemove && (
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            onRemove();
+          }}
+          aria-label={`${t.name} 태그 제거`}
+          style={{
+            position: "absolute",
+            top: -6, right: -6,
+            width: 13, height: 13, borderRadius: "50%",
+            background: "var(--accent)",
+            border: "1px solid var(--accent-deep)",
+            color: "white",
+            fontSize: 9, lineHeight: 1, cursor: "pointer",
+            display: "flex", alignItems: "center", justifyContent: "center",
+            padding: 0,
+            boxShadow: "0 0 0 2px var(--bg-surface)",
+          }}
+        >
+          ×
+        </button>
+      )}
     </span>
   );
 };
