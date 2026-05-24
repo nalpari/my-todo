@@ -8,9 +8,12 @@ import {
   type Project,
   type Tag,
   type Task,
+  type Subtask,
   type ProjectRow,
+  type SubtaskRow,
   type TaskRow,
   rowToTask,
+  rowToSubtask,
   toISODate,
 } from "@/lib/data";
 
@@ -111,20 +114,45 @@ export async function getTasks(today: Date): Promise<Task[]> {
   );
 }
 
+/* ─── Subtasks ──────────────────────────────────────────── */
+
+/**
+ * 사용자의 모든 subtasks 조회. task 의 -30..+60 윈도우와 무관하게 전부 가져옴 —
+ * subtask 는 양이 적고 task expand 시 즉시 보여야 하므로 클라이언트 메모리에
+ * 두는 게 자연스럽다 (TaskList 의 N+1 fetch 회피).
+ */
+export async function getSubtasks(): Promise<Subtask[]> {
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from("subtasks")
+    .select("*")
+    .order("sort_order")
+    .order("created_at");
+
+  if (error) {
+    console.error("[getSubtasks]", error.message);
+    return [];
+  }
+
+  return (data as SubtaskRow[]).map(rowToSubtask);
+}
+
 /* ─── 통합 조회 (page.tsx에서 1번 호출) ─────────────────────── */
 
 export type AppData = {
   projects: Project[];
   tags: Tag[];
   tasks: Task[];
+  subtasks: Subtask[];
 };
 
 export async function getAppData(): Promise<AppData> {
   const today = new Date();
-  const [projects, tags, tasks] = await Promise.all([
+  const [projects, tags, tasks, subtasks] = await Promise.all([
     getProjects(),
     getTags(),
     getTasks(today),
+    getSubtasks(),
   ]);
 
   // 프로젝트별 미완료 task 수 계산
@@ -139,5 +167,5 @@ export async function getAppData(): Promise<AppData> {
     count: countMap.get(p.id) ?? 0,
   }));
 
-  return { projects: projectsWithCount, tags, tasks };
+  return { projects: projectsWithCount, tags, tasks, subtasks };
 }

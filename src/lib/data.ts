@@ -36,6 +36,17 @@ export type TaskRow = {
   updated_at: string;
 };
 
+export type SubtaskRow = {
+  id: string;
+  task_id: string;
+  user_id: string;
+  title: string;
+  done: boolean;
+  sort_order: number;
+  created_at: string;
+  updated_at: string;
+};
+
 /* ─── UI 표시용 타입 ─────────────────────────────────────────── */
 
 /** 사이드바·분포 차트용 프로젝트 (task count 포함) */
@@ -50,6 +61,16 @@ export type Tag = {
   id: string;
   name: string;
   hue: "accent" | "muted";
+};
+
+/** UI 표시용 서브태스크. task 와 분리된 별도 array 로 흐름 — taskId 로 룩업. */
+export type Subtask = {
+  id: string;
+  task_id: string;
+  title: string;
+  done: boolean;
+  sort_order: number;
+  created_at: string;
 };
 
 /**
@@ -209,3 +230,14 @@ export const tagById = (tags: Tag[], id: string) =>
 
 export const tasksByBucket = (tasks: Task[], key: BucketKey) =>
   tasks.filter((t) => t.bucket === key);
+
+export function rowToSubtask(row: SubtaskRow): Subtask {
+  return {
+    id: row.id,
+    task_id: row.task_id,
+    title: row.title,
+    done: row.done,
+    sort_order: row.sort_order,
+    created_at: row.created_at,
+  };
+}
