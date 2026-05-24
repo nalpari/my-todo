@@ -7,6 +7,7 @@ import { useRouter } from "next/navigation";
 import { signOut } from "@/app/auth/actions";
 import { createTask } from "@/app/tasks/actions";
 import { KeyHint, MonoLabel, TagChip } from "./Primitives";
+import { ProjectList } from "./ProjectList";
 import { useApp } from "@/lib/AppContext";
 import { toISODate } from "@/lib/data";
 
@@ -15,7 +16,7 @@ export type DisplayUser = { name: string; email: string; avatarUrl?: string };
 type SidebarProps = { active?: string; compact?: boolean; user: DisplayUser };
 
 export const AppSidebar = ({ active = "today", compact = false, user }: SidebarProps) => {
-  const { projects, tags, tasks } = useApp();
+  const { tags, tasks } = useApp();
 
   const navItems = [
     { id: "today",    label: "오늘",   count: tasks.filter((t) => t.bucket === "today" && !t.done).length,    kbd: "⌘1" },
@@ -67,29 +68,7 @@ export const AppSidebar = ({ active = "today", compact = false, user }: SidebarP
       </nav>
 
       {/* projects */}
-      <div style={S.section}>
-        <div style={S.sectionHead}>
-          <MonoLabel tracking={1.4} size={10}>Projects</MonoLabel>
-          <button style={S.addBtn} aria-label="add project" type="button">+</button>
-        </div>
-        <ul style={S.projList}>
-          {projects.map((p) => (
-            <li key={p.id} style={S.projRow}>
-              <span
-                style={{
-                  width: 8,
-                  height: 8,
-                  borderRadius: 2,
-                  background: p.color,
-                  flexShrink: 0,
-                }}
-              />
-              <span style={S.projName}>{p.name}</span>
-              <span style={S.projCount}>{p.count}</span>
-            </li>
-          ))}
-        </ul>
-      </div>
+      <ProjectList />
 
       {/* tags */}
       <div style={S.section}>
@@ -269,19 +248,6 @@ const S: Record<string, CSSProperties> = {
   navCount: { fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--text-faint)", letterSpacing: 0.3 },
   section: { display: "flex", flexDirection: "column", gap: 10 },
   sectionHead: { display: "flex", alignItems: "center", justifyContent: "space-between", padding: "0 4px" },
-  addBtn: {
-    width: 18, height: 18, borderRadius: 4,
-    background: "transparent", border: "1px solid var(--border)",
-    color: "var(--text-muted)", fontSize: 12, lineHeight: 1, cursor: "pointer",
-  },
-  projList: { listStyle: "none", margin: 0, padding: 0, display: "flex", flexDirection: "column", gap: 2 },
-  projRow: {
-    display: "flex", alignItems: "center", gap: 10,
-    padding: "6px 10px", borderRadius: "var(--radius-sm)",
-    fontSize: 13, color: "var(--text-secondary)", cursor: "pointer",
-  },
-  projName: { flex: 1, letterSpacing: -0.1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" },
-  projCount: { fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--text-faint)" },
   shortcutBox: {
     marginTop: "auto",
     padding: "10px 12px", borderRadius: "var(--radius)",
