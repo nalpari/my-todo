@@ -415,7 +415,11 @@ export const MiniCalendar = ({ compact = false }: { compact?: boolean }) => {
   const daysInMonth = new Date(year, month + 1, 0).getDate();
   const daysInPrev = new Date(year, month, 0).getDate();
 
-  const cells = Array.from({ length: 35 }, (_, i) => {
+  // 필요한 행 수: offset (앞쪽 빈칸) + daysInMonth 를 7 로 나눠 올림.
+  // 토요일/일요일에 1일이 시작하는 달은 6주 (42셀) 가 필요해 35셀 고정 시 마지막 줄이 잘렸음.
+  const rows = Math.ceil((offset + daysInMonth) / 7);
+  const cellCount = rows * 7;
+  const cells = Array.from({ length: cellCount }, (_, i) => {
     const dayNum = i - offset + 1;
     if (dayNum <= 0) return { n: daysInPrev + dayNum, dim: true, date: null };
     if (dayNum > daysInMonth) return { n: dayNum - daysInMonth, dim: true, date: null };
