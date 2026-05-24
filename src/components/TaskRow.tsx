@@ -47,7 +47,7 @@ export const TaskRow = ({
   showTime?: boolean;
 }) => {
   const { toggleTask, deleteTask, updateTaskTitle, projects } = useApp();
-  const project = task.project ? projects.find((p) => p.id === task.project) : null;
+  const project = task.projectId ? projects.find((p) => p.id === task.projectId) : null;
   const hasSub = task.subtotal > 0;
   const [isEditing, setIsEditing] = useState(false);
   const [editValue, setEditValue] = useState(task.title);
@@ -110,7 +110,7 @@ export const TaskRow = ({
                   textTransform: "uppercase",
                 }}
               >
-                <ProjectDot id={task.project} size={6} />
+                <ProjectDot id={task.projectId} size={6} />
                 {project.name}
               </span>
             )}
@@ -194,7 +194,7 @@ export const TaskRow = ({
         >
           {task.title}
         </span>
-        {showProject && project && <ProjectDot id={task.project} size={6} />}
+        {showProject && project && <ProjectDot id={task.projectId} size={6} />}
         {showTime && task.due_time && (
           <span style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--text-faint)", letterSpacing: 0.3 }}>
             {task.due_time}
@@ -271,7 +271,7 @@ export const TaskRow = ({
           <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", marginTop: 6 }}>
             {showProject && project && (
               <span style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 11.5, color: "var(--text-muted)" }}>
-                <ProjectDot id={task.project} size={6} />
+                <ProjectDot id={task.projectId} size={6} />
                 {project.name}
               </span>
             )}

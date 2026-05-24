@@ -98,7 +98,7 @@ export type BucketKey =
 export type Task = {
   id: string;           // DB uuid
   title: string;
-  project: string | null;   // project_id
+  projectId: string | null; // DB 의 project_id 를 1:1 미러 — 이름만 카멜케이스로
   tags: string[];            // tag id 배열
   due_date: string | null;  // ISO date
   due_time: string | null;  // "HH:MM"
@@ -207,7 +207,7 @@ export function rowToTask(row: TaskRow, tagIds: string[], today: Date): Task {
   return {
     id: row.id,
     title: row.title,
-    project: row.project_id,
+    projectId: row.project_id,
     tags: tagIds,
     due_date: row.due_date,
     due_time: row.due_time,
