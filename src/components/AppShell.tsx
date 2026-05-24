@@ -3,28 +3,42 @@
 import type { CSSProperties } from "react";
 import { useFormStatus } from "react-dom";
 import { useRef, useState, useTransition } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { signOut } from "@/app/auth/actions";
 import { createTask } from "@/app/tasks/actions";
 import { KeyHint, MonoLabel, TagChip } from "./Primitives";
 import { ProjectList } from "./ProjectList";
 import { useApp } from "@/lib/AppContext";
 import { toISODate } from "@/lib/data";
+import { parseView, toggleViewHref, type ViewKey } from "@/lib/view";
 
 export type DisplayUser = { name: string; email: string; avatarUrl?: string };
 
-type SidebarProps = { active?: string; compact?: boolean; user: DisplayUser };
+type SidebarProps = { compact?: boolean; user: DisplayUser };
 
-export const AppSidebar = ({ active = "today", compact = false, user }: SidebarProps) => {
+/**
+ * nav 카운트는 항상 "프로젝트 필터를 무시한 전역 카운트" (Q3-d).
+ * inbox 분리 (Q3-a) 적용 후 정의 충돌 해소됨.
+ */
+export const AppSidebar = ({ compact = false, user }: SidebarProps) => {
   const { tags, tasks } = useApp();
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const activeView = parseView(searchParams.get("view"));
 
-  const navItems = [
-    { id: "today",    label: "오늘",   count: tasks.filter((t) => t.bucket === "today" && !t.done).length,    kbd: "⌘1" },
-    { id: "upcoming", label: "예정",   count: tasks.filter((t) => !["today", "overdue"].includes(t.bucket) && !t.done).length, kbd: "⌘2" },
-    { id: "inbox",    label: "인박스", count: tasks.filter((t) => !t.due_date && !t.done).length,              kbd: "⌘3" },
-    { id: "someday",  label: "언젠가", count: tasks.filter((t) => t.bucket === "later" && !t.done).length,     kbd: null },
-    { id: "done",     label: "완료",   count: tasks.filter((t) => t.done).length,                              kbd: null },
+  const navItems: { id: ViewKey; label: string; count: number; kbd: string | null }[] = [
+    { id: "today",    label: "오늘",   count: tasks.filter((t) => (t.bucket === "today" || t.bucket === "overdue") && !t.done).length, kbd: "⌘1" },
+    { id: "upcoming", label: "예정",   count: tasks.filter((t) => ["tomorrow","day3","day4","day5","day6","day7"].includes(t.bucket) && !t.done).length, kbd: "⌘2" },
+    { id: "inbox",    label: "인박스", count: tasks.filter((t) => t.bucket === "inbox" && !t.done).length, kbd: "⌘3" },
+    { id: "someday",  label: "언젠가", count: tasks.filter((t) => t.bucket === "later" && !t.done).length, kbd: null },
+    { id: "done",     label: "완료",   count: tasks.filter((t) => t.done).length, kbd: null },
   ];
+
+  const handleNavClick = (e: React.MouseEvent, viewId: ViewKey) => {
+    e.preventDefault();
+    // router.replace — 히스토리 폭증 방지 (Q3-c). 동일 뷰 재클릭은 toggleViewHref 가 default 로 처리.
+    router.replace(toggleViewHref(new URLSearchParams(searchParams.toString()), viewId), { scroll: false });
+  };
 
   return (
     <aside style={{ ...S.sidebar, width: compact ? 220 : 260 }}>
@@ -43,11 +57,12 @@ export const AppSidebar = ({ active = "today", compact = false, user }: SidebarP
       {/* primary nav */}
       <nav style={S.nav}>
         {navItems.map((n) => {
-          const isActive = n.id === active;
+          const isActive = n.id === activeView;
           return (
             <a
               key={n.id}
-              href="#"
+              href={toggleViewHref(new URLSearchParams(searchParams.toString()), n.id)}
+              onClick={(e) => handleNavClick(e, n.id)}
               style={{ ...S.navLink, ...(isActive ? S.navLinkActive : {}) }}
             >
               <span
@@ -98,25 +113,19 @@ export const AppSidebar = ({ active = "today", compact = false, user }: SidebarP
 };
 
 export const AppTopBar = ({
-  title = "오늘",
+  title,
   subtitle,
   dense = false,
 }: {
-  title?: string;
-  subtitle?: string;
+  title: string;
+  subtitle: string;
   dense?: boolean;
 }) => {
-  // 실시간 날짜는 VariantBSplit에서 내려줌 — 없으면 오늘 날짜 폴백
-  const defaultSubtitle = subtitle ?? (() => {
-    const now = new Date();
-    return `${now.getMonth() + 1}월 ${now.getDate()}일, ${["일", "월", "화", "수", "목", "금", "토"][now.getDay()]}요일`;
-  })();
-
   return (
     <div style={{ ...S.topbar, padding: dense ? "14px 32px" : "20px 40px" }}>
       <div style={{ display: "flex", alignItems: "baseline", gap: 14, minWidth: 0 }}>
         <h1 style={S.topTitle}>{title}</h1>
-        <span style={S.topSub}>{defaultSubtitle}</span>
+        <span style={S.topSub}>{subtitle}</span>
       </div>
       <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
         <div style={S.search}>
