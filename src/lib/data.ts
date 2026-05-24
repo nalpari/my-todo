@@ -55,6 +55,11 @@ export type Tag = {
 /**
  * 할 일 타임라인 버킷 키.
  * DB의 due_date(DATE)를 오늘 기준으로 분류할 때 사용한다.
+ *
+ * inbox: due_date 가 null — "언제 할지 정하지 않은" 일.
+ * later: due_date 가 today + 7일 보다 미래 — "한참 뒤" 일.
+ * 둘은 의미가 다르므로 분리 (이전 버전은 둘 다 "later" 로 묶여 사이드바
+ * 인박스/언젠가 카운트가 중복되는 버그가 있었음).
  */
 export type BucketKey =
   | "overdue"
@@ -65,7 +70,8 @@ export type BucketKey =
   | "day5"
   | "day6"
   | "day7"
-  | "later";
+  | "later"
+  | "inbox";
 
 /** UI 컴포넌트에 넘기는 Task (DB Row + 파생 필드) */
 export type Task = {
@@ -80,6 +86,9 @@ export type Task = {
   subdone: number;
   /** due_date → 오늘 기준 버킷. 클라이언트에서 계산 */
   bucket: BucketKey;
+  /** TaskList 의 인박스/완료 정렬에 사용 (ISO timestamp) */
+  created_at: string;
+  updated_at: string;
 };
 
 export type DayBucket = {
@@ -108,7 +117,7 @@ export function toISODate(d: Date): string {
 
 /** due_date(ISO)를 오늘 기준 BucketKey로 변환 */
 export function dateToBucket(dueDate: string | null, today: Date): BucketKey {
-  if (!dueDate) return "later";
+  if (!dueDate) return "inbox";
   const due = new Date(dueDate + "T00:00:00"); // 로컬 자정
   const todayMidnight = new Date(today.getFullYear(), today.getMonth(), today.getDate());
   const diff = Math.floor((due.getTime() - todayMidnight.getTime()) / 86400000);
@@ -185,6 +194,8 @@ export function rowToTask(row: TaskRow, tagIds: string[], today: Date): Task {
     subtotal: row.subtotal,
     subdone: row.subdone,
     bucket: dateToBucket(row.due_date, today),
+    created_at: row.created_at,
+    updated_at: row.updated_at,
   };
 }
 
