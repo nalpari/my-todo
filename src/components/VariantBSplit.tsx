@@ -2,13 +2,22 @@
 
 import type { CSSProperties } from "react";
 import { useState, useEffect } from "react";
+import { useSearchParams } from "next/navigation";
 import { Checkbox, MonoLabel, ProjectDot } from "./Primitives";
 import { AppSidebar, AppTopBar, InputBar, type DisplayUser } from "./AppShell";
 import { MiniCalendar, SubtaskMeter } from "./TaskRow";
+import { TaskList } from "./TaskList";
 import { AppProvider, useApp } from "@/lib/AppContext";
 import { toISODate, type Task } from "@/lib/data";
 import { type AppData } from "@/lib/queries";
 import { TagChip } from "./Primitives";
+import {
+  parseView,
+  parseProjectId,
+  filterTasks,
+  viewTitle,
+  viewSubtitleContext,
+} from "@/lib/view";
 
 /* ─── ErrorToast ────────────────────────────────────────────── */
 const ErrorToast = () => {
@@ -85,21 +94,129 @@ function useLiveClock() {
 /* ─── 내부 컴포넌트 (AppProvider 안) ─────────────────────────── */
 const VariantBSplitInner = ({ user }: { user: DisplayUser }) => {
   const now = useLiveClock();
-  const { tasks, projects } = useApp();
+  const { tasks: allTasks, projects } = useApp();
+  const searchParams = useSearchParams();
+
+  const view = parseView(searchParams.get("view"));
+  const activeProjectId = parseProjectId(searchParams.get("project"));
+  const activeProject = activeProjectId ? projects.find((p) => p.id === activeProjectId) ?? null : null;
+
+  // 뷰 + 프로젝트 필터 적용. 우측 rail 의 다가오는 일정·분포 차트는 의도적으로
+  // 전역 allTasks 사용 — 필터 컨텍스트와 독립된 peripheral view.
+  const visibleTasks = filterTasks(allTasks, view, activeProjectId);
 
   const today = now;
   const todayISO = toISODate(today);
 
-  // 오늘 태스크 (타임라인용)
-  const todayTasks = tasks.filter((t) => t.due_date === todayISO);
-  // 다가오는 태스크 (오늘 이후 미완료 4개)
-  const upcomingTasks = tasks
-    .filter((t) => t.due_date && t.due_date > todayISO && !t.done)
-    .sort((a, b) => (a.due_date ?? "").localeCompare(b.due_date ?? ""))
-    .slice(0, 4);
+  // TopBar 라벨
+  const title = viewTitle(view);
+  const subtitleContext = viewSubtitleContext(view, today);
+  const subtitle =
+    `${subtitleContext} · ${visibleTasks.length} tasks` +
+    (activeProject ? ` · ${activeProject.name}` : "");
 
-  const doneTasks = tasks.filter((t) => t.done).length;
-  const totalTasks = tasks.length;
+  return (
+    <div style={S.appRoot}>
+      <AppSidebar user={user} />
+      <div style={S.colMain}>
+        <AppTopBar title={title} subtitle={subtitle} dense />
+
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 320px", flex: 1, minHeight: 0 }}>
+          {/* CENTER — view 에 따라 분기 */}
+          <div style={{ ...S.scrollPad, paddingRight: 16 }} className="no-scrollbar">
+            <div style={{ padding: "24px 32px 0" }}>
+              {view === "today" ? (
+                <TodayTimeline
+                  visibleTasks={visibleTasks}
+                  allTasks={allTasks}
+                  today={today}
+                  now={now}
+                  todayISO={todayISO}
+                />
+              ) : (
+                <TaskList tasks={visibleTasks} view={view} today={today} />
+              )}
+              <div style={{ height: 100 }} />
+            </div>
+
+            <InputBar floating />
+          </div>
+
+          {/* RIGHT RAIL — 뷰와 무관하게 일관 (Q4-f) */}
+          <aside style={S.rightRail}>
+            <MiniCalendar />
+
+            <div>
+              <div style={S.railHead}>
+                <MonoLabel tracking={1.5}>다가오는 일정</MonoLabel>
+                <a href="#" style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--accent)", textDecoration: "none", letterSpacing: 0.5 }}>
+                  전체 ↗
+                </a>
+              </div>
+              <UpcomingRail allTasks={allTasks} todayISO={todayISO} />
+            </div>
+
+            <div>
+              <div style={S.railHead}>
+                <MonoLabel tracking={1.5}>이번 주 진행률</MonoLabel>
+              </div>
+              <ProgressCard
+                done={allTasks.filter((t) => t.done).length}
+                total={allTasks.length}
+              />
+            </div>
+
+            <div>
+              <div style={S.railHead}>
+                <MonoLabel tracking={1.5}>프로젝트별 분포</MonoLabel>
+              </div>
+              <div style={{ padding: 14, borderRadius: "var(--radius)", border: "1px solid var(--border)", background: "var(--bg-surface)", display: "flex", flexDirection: "column", gap: 10 }}>
+                {projects.map((p) => (
+                  <div key={p.id} style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                    <span style={{ width: 8, height: 8, borderRadius: 2, background: p.color }} />
+                    <span style={{ fontSize: 12.5, color: "var(--text-secondary)", flex: 1, letterSpacing: -0.1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                      {p.name}
+                    </span>
+                    <div style={{ width: 60, height: 3, borderRadius: 2, background: "rgba(255,255,255,0.06)", overflow: "hidden" }}>
+                      <div style={{ width: `${Math.min(100, p.count * 12)}%`, height: "100%", background: p.color, opacity: 0.7 }} />
+                    </div>
+                    <span style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--text-faint)", minWidth: 16, textAlign: "right" }}>
+                      {p.count}
+                    </span>
+                  </div>
+                ))}
+                {projects.length === 0 && (
+                  <div style={{ fontSize: 12, color: "var(--text-faint)" }}>프로젝트 없음</div>
+                )}
+              </div>
+            </div>
+          </aside>
+        </div>
+      </div>
+      <ErrorToast />
+    </div>
+  );
+};
+
+/* ─── TodayTimeline ─────────────────────────────────────────
+ * 기존 hour-timeline 로직을 분리. visibleTasks 는 이미 (오늘+overdue + 프로젝트
+ * 필터) 적용된 상태. todayTasks 는 시간 그리드에 들어갈 due_date === 오늘 만.
+ * overdue 는 카운트만 헤더에 표시 (시간 그리드에 자리 없음 — 기존 동작 유지).
+ */
+const TodayTimeline = ({
+  visibleTasks,
+  allTasks,
+  today,
+  now,
+  todayISO,
+}: {
+  visibleTasks: Task[];
+  allTasks: Task[];
+  today: Date;
+  now: Date;
+  todayISO: string;
+}) => {
+  const todayTasks = visibleTasks.filter((t) => t.due_date === todayISO);
 
   // KO 요일
   const KO_DOW = ["일", "월", "화", "수", "목", "금", "토"];
@@ -143,134 +260,90 @@ const VariantBSplitInner = ({ user }: { user: DisplayUser }) => {
     const th = parseInt(t.due_time.split(":")[0] ?? "", 10);
     return !Number.isFinite(th);
   });
-  const overdueTask = tasks.filter((t) => t.bucket === "overdue");
+  // overdue 는 필터 컨텍스트 안의 것만 카운트 (visibleTasks 가 이미 필터됨)
+  const overdueTask = visibleTasks.filter((t) => t.bucket === "overdue");
 
-  const topbarSubtitle = `May ${today.getDate()} · ${tasks.filter((t) => t.bucket === "today").length} tasks`;
+  // 전체 todayTasks 가 0 일 때 빈 상태 — 시간 그리드는 그래도 그리지만 헤더 분위기만 변화.
+  // (TaskList 의 EmptyState 와 달리 timeline 은 시간 자체가 컨텐츠라 유지)
+  const hasAny = todayTasks.length > 0 || overdueTask.length > 0 || untimedTasks.length > 0;
 
   return (
-    <div style={S.appRoot}>
-      <AppSidebar active="today" user={user} />
-      <div style={S.colMain}>
-        <AppTopBar title="이번 주" subtitle={topbarSubtitle} dense />
-
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 320px", flex: 1, minHeight: 0 }}>
-          {/* CENTER — hour timeline */}
-          <div style={{ ...S.scrollPad, paddingRight: 16 }} className="no-scrollbar">
-            <div style={{ padding: "24px 32px 0" }}>
-              {/* editorial today header */}
-              <div style={{ display: "flex", alignItems: "baseline", gap: 18, marginBottom: 20 }}>
-                <div
-                  style={{
-                    fontFamily: "var(--font-display)", fontStyle: "italic",
-                    fontVariationSettings: '"opsz" 144, "wght" 320',
-                    fontSize: 72, lineHeight: 0.9,
-                    color: "var(--text-display)", letterSpacing: -2.5,
-                  }}
-                >
-                  {enDow}
-                </div>
-                <div>
-                  <div style={{ fontSize: 16, color: "var(--text-secondary)", fontWeight: 500, marginBottom: 2 }}>
-                    {dateStr}
-                  </div>
-                  <MonoLabel tracking={1.4}>
-                    {String(todayTasks.length).padStart(2, "0")} tasks
-                    {overdueTask.length > 0 ? ` · ${overdueTask.length} overdue` : ""}
-                  </MonoLabel>
-                </div>
-              </div>
-
-              {/* 시간 없는 오늘 태스크 */}
-              {untimedTasks.length > 0 && (
-                <div style={{ marginBottom: 16 }}>
-                  <div style={{ marginBottom: 8 }}>
-                    <MonoLabel size={10} tracking={1.4}>시간 미지정</MonoLabel>
-                  </div>
-                  <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                    {untimedTasks.map((t) => (
-                      <TimelineCard key={t.id} task={t} />
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {/* hour timeline */}
-              <div style={{ display: "flex", flexDirection: "column" }}>
-                {hours.map((h) => (
-                  <HourRow
-                    key={h}
-                    hour={h}
-                    nowLine={nowHour >= minHour && nowHour <= maxHour && h === nowRowHour}
-                    nowTimeStr={nowMinStr}
-                    tasks={tasksByHour(h)}
-                  />
-                ))}
-              </div>
-
-              <div style={{ height: 100 }} />
-            </div>
-
-            <InputBar floating />
-          </div>
-
-          {/* RIGHT RAIL */}
-          <aside style={S.rightRail}>
-            <MiniCalendar />
-
-            <div>
-              <div style={S.railHead}>
-                <MonoLabel tracking={1.5}>다가오는 일정</MonoLabel>
-                <a href="#" style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--accent)", textDecoration: "none", letterSpacing: 0.5 }}>
-                  전체 ↗
-                </a>
-              </div>
-              <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                {upcomingTasks.map((t) => (
-                  <UpcomingItem key={t.id} task={t} />
-                ))}
-                {upcomingTasks.length === 0 && (
-                  <div style={{ fontSize: 12, color: "var(--text-faint)", padding: "8px 10px" }}>
-                    다가오는 일정이 없습니다
-                  </div>
-                )}
-              </div>
-            </div>
-
-            <div>
-              <div style={S.railHead}>
-                <MonoLabel tracking={1.5}>이번 주 진행률</MonoLabel>
-              </div>
-              <ProgressCard done={doneTasks} total={totalTasks} />
-            </div>
-
-            <div>
-              <div style={S.railHead}>
-                <MonoLabel tracking={1.5}>프로젝트별 분포</MonoLabel>
-              </div>
-              <div style={{ padding: 14, borderRadius: "var(--radius)", border: "1px solid var(--border)", background: "var(--bg-surface)", display: "flex", flexDirection: "column", gap: 10 }}>
-                {projects.map((p) => (
-                  <div key={p.id} style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                    <span style={{ width: 8, height: 8, borderRadius: 2, background: p.color }} />
-                    <span style={{ fontSize: 12.5, color: "var(--text-secondary)", flex: 1, letterSpacing: -0.1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                      {p.name}
-                    </span>
-                    <div style={{ width: 60, height: 3, borderRadius: 2, background: "rgba(255,255,255,0.06)", overflow: "hidden" }}>
-                      <div style={{ width: `${Math.min(100, p.count * 12)}%`, height: "100%", background: p.color, opacity: 0.7 }} />
-                    </div>
-                    <span style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--text-faint)", minWidth: 16, textAlign: "right" }}>
-                      {p.count}
-                    </span>
-                  </div>
-                ))}
-                {projects.length === 0 && (
-                  <div style={{ fontSize: 12, color: "var(--text-faint)" }}>프로젝트 없음</div>
-                )}
-              </div>
-            </div>
-          </aside>
+    <>
+      {/* editorial today header */}
+      <div style={{ display: "flex", alignItems: "baseline", gap: 18, marginBottom: 20 }}>
+        <div
+          style={{
+            fontFamily: "var(--font-display)", fontStyle: "italic",
+            fontVariationSettings: '"opsz" 144, "wght" 320',
+            fontSize: 72, lineHeight: 0.9,
+            color: "var(--text-display)", letterSpacing: -2.5,
+          }}
+        >
+          {enDow}
         </div>
+        <div>
+          <div style={{ fontSize: 16, color: "var(--text-secondary)", fontWeight: 500, marginBottom: 2 }}>
+            {dateStr}
+          </div>
+          <MonoLabel tracking={1.4}>
+            {String(todayTasks.length).padStart(2, "0")} tasks
+            {overdueTask.length > 0 ? ` · ${overdueTask.length} overdue` : ""}
+            {!hasAny ? " · all clear" : ""}
+          </MonoLabel>
+        </div>
+        {/* allTasks 는 hook 의존성 일관성을 위해 prop 으로 받지만 현 헤더에서는 사용 안 함 */}
+        <span aria-hidden="true" style={{ display: "none" }}>{allTasks.length}</span>
       </div>
-      <ErrorToast />
+
+      {/* 시간 없는 오늘 태스크 */}
+      {untimedTasks.length > 0 && (
+        <div style={{ marginBottom: 16 }}>
+          <div style={{ marginBottom: 8 }}>
+            <MonoLabel size={10} tracking={1.4}>시간 미지정</MonoLabel>
+          </div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+            {untimedTasks.map((t) => (
+              <TimelineCard key={t.id} task={t} />
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* hour timeline */}
+      <div style={{ display: "flex", flexDirection: "column" }}>
+        {hours.map((h) => (
+          <HourRow
+            key={h}
+            hour={h}
+            nowLine={nowHour >= minHour && nowHour <= maxHour && h === nowRowHour}
+            nowTimeStr={nowMinStr}
+            tasks={tasksByHour(h)}
+          />
+        ))}
+      </div>
+    </>
+  );
+};
+
+/* ─── UpcomingRail ──────────────────────────────────────── */
+const UpcomingRail = ({ allTasks, todayISO }: { allTasks: Task[]; todayISO: string }) => {
+  const upcomingTasks = allTasks
+    .filter((t) => t.due_date && t.due_date > todayISO && !t.done)
+    .sort((a, b) => (a.due_date ?? "").localeCompare(b.due_date ?? ""))
+    .slice(0, 4);
+
+  if (upcomingTasks.length === 0) {
+    return (
+      <div style={{ fontSize: 12, color: "var(--text-faint)", padding: "8px 10px" }}>
+        다가오는 일정이 없습니다
+      </div>
+    );
+  }
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+      {upcomingTasks.map((t) => (
+        <UpcomingItem key={t.id} task={t} />
+      ))}
     </div>
   );
 };
