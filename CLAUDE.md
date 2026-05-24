@@ -114,13 +114,15 @@ DB 마이그레이션 SQL: `supabase/migrations/` (현재 `001_initial_schema.sq
 
 | 파일 | 역할 |
 |------|------|
-| `src/lib/data.ts` | 타입 정의 (ProjectRow, TaskRow, Project, Tag, Task, BucketKey), 날짜 유틸 (toISODate, dateToBucket, buildWeek, buildDayBuckets, rowToTask) |
+| `src/lib/data.ts` | 타입 정의 (ProjectRow, TaskRow, Project, Tag, Task, **BucketKey** — `inbox` (due_date null) 와 `later` (today+7 너머) 분리), 날짜 유틸 (toISODate, dateToBucket, buildWeek, buildDayBuckets, rowToTask). Task 에 created_at/updated_at 포함 (TaskList 정렬용) |
 | `src/lib/queries.ts` | RSC 서버에서 DB fetch (getProjects, getTags, getTasks, getAppData) |
 | `src/lib/palette.ts` | 프로젝트 색 팔레트 (`PROJECT_COLORS` 8색, `DEFAULT_PROJECT_COLOR`, `isProjectColor` 런타임 가드) — Server Action 검증과 사이드바 swatch picker 가 공유 |
+| `src/lib/view.ts` | 사이드바 view 라우팅 + 프로젝트 필터의 URL 직렬화·필터·정렬·라벨 헬퍼. `ViewKey`, `parseView`/`parseProjectId`, `toggleViewHref`/`toggleProjectHref` (동일 항목 재클릭 시 키 제거), `filterTasks` (view+project AND), `sortTasksForView`, `viewTitle`/`viewSubtitleContext`/`viewEmptyMessage` |
 | `src/lib/AppContext.tsx` | Client 컨텍스트. `useOptimistic` reducer 가 task 와 project 변이를 함께 관리 (task.toggle/delete/updateTitle + project.create/update/delete). `project.delete` 는 소속 task 의 `project` 필드를 null 로 cascade 해 DB 의 ON DELETE SET NULL 과 일치 |
 | `src/app/tasks/actions.ts` | Server Actions (createTask, toggleTask, updateTask, deleteTask) + `revalidatePath("/")` |
 | `src/app/projects/actions.ts` | Server Actions (createProject, updateProject, deleteProject). 동일 컨벤션 + `parseName` (trim·연속공백→1개·1-50자) + `parseColor` (`isProjectColor` enum 가드) + 23505 캐치 |
-| `src/components/ProjectList.tsx` | 사이드바 프로젝트 섹션 UI. ProjectRow 는 이름 인라인 편집 (blur=save, Esc=cancel) + 색 swatch popover + 호버 × 2단계 삭제 (`정말? · N개 해제`). NewProjectRow 는 `+` 버튼으로 펼침, 색 dot/swatch 클릭 시 input focus 유지 위해 mousedown 에서 `preventDefault` |
+| `src/components/ProjectList.tsx` | 사이드바 프로젝트 섹션 UI. ProjectRow 는 **이름 클릭 = 필터 토글** (URL `project` 키), 호버 ✎ = 인라인 편집 (blur=save, Esc=cancel), 색 dot = swatch popover, 호버 × = 2단계 삭제 (`정말? · N개 해제`). 활성 시 row 좌측 코랄 인디케이터 + bg 강조. NewProjectRow 는 `+` 버튼으로 펼침, 색 dot/swatch mousedown `preventDefault` 로 input focus 유지 |
+| `src/components/TaskList.tsx` | 비-오늘 뷰의 중앙 컨텐츠. `upcoming` 은 일별 헤더로 그룹핑 (비어있는 날 생략), `inbox`/`someday`/`done` 은 평면 리스트. 정렬은 `sortTasksForView`. 빈 상태 메시지 뷰별 |
 
 ### CRUD 흐름
 
@@ -141,14 +143,30 @@ DB 마이그레이션 SQL: `supabase/migrations/` (현재 `001_initial_schema.sq
 - Server Action 은 사실상 public RPC. TS 타입은 런타임 강제력이 없으므로 client 가 임의 키 (`user_id`, `sort_order` 등) 를 보낼 수 있다. `actions.ts` 의 `parseTitle`/`parseNullableDate`/`parseNullableTime`/`parseNullableUuid` 헬퍼가 키 화이트리스트 + 포맷 검증을 담당. `updateTask` 는 `fields: unknown` 으로 받고 명시된 4개 키만 update 객체에 옮긴다.
 - `project_id` 는 `assertOwnedProject` 로 사전 소유권 확인 후 update — 003 의 복합 FK 가 cross-tenant 참조를 어차피 거부하지만, 사용자에게 명확한 에러 메시지 제공.
 
+## 사이드바 view 라우팅 + 프로젝트 필터
+
+URL state: `/?view=today&project=<uuid>`. `view` 기본값은 `today`, 없으면 default — URL 에 명시하지 않아 깨끗하게 유지. `project` 없으면 전체. 동일 항목 재클릭 = URL 키 제거 (default 복귀 / 필터 해제). 모든 nav·프로젝트 클릭은 `router.replace` (히스토리 폭증 방지).
+
+뷰 정의 (필터 + !done):
+- **today**: `bucket in [today, overdue]` (overdue 도 오늘 시각으로 표시 — 카운트는 헤더에 별도)
+- **upcoming**: `bucket in [tomorrow, day3..day7]`
+- **inbox**: `bucket === "inbox"` (due_date null)
+- **someday**: `bucket === "later"` (today+7 너머)
+- **done**: `done === true` (date 무시, 직교)
+
+레이아웃 분기: `view === "today"` → 기존 hour-timeline (분리된 `<TodayTimeline />` 서브컴포넌트), 그 외 → `<TaskList />`. 우측 rail (미니 캘린더 / 다가오는 일정 / 진행률 / 분포) 은 뷰·필터와 독립된 peripheral view 라 전역 `allTasks` 사용 — 의도된 컨텍스트 일관성.
+
+사이드바 nav 카운트는 **프로젝트 필터를 무시한 전역 카운트** — 다른 뷰의 전체 task 가 몇 개인지 보여야 의미. "지금 보고 있는 뷰 + 필터 결과 수" 는 TopBar subtitle 이 담당 (`{context} · N tasks · {projectName?}`).
+
 ## Not in scope (don't add unprompted)
 
 - Variants A and C — deferred.
 - A test framework.
 - 태그 CRUD UI (현재 DB에서 조회만, 추가/삭제 UI 없음)
-- 프로젝트 클릭 → 필터 / 사이드바 view 라우팅 (CRUD 만 구현, 클릭 시 inert)
 - 서브태스크 CRUD (subtotal/subdone 은 표시만)
-- 검색/필터 기능 (UI만)
+- 검색 (TopBar `⌘K` 검색 input 활성화)
+- 필터 칩 (TopBar `필터 · 2` hardcoded label 동적화)
+- InputBar 의 view-aware due_date 기본값 (예정 → 내일, 인박스 → null 등)
 
 If a task seems to require any of these, confirm with the user before adding the dependency.
 
