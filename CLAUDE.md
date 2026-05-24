@@ -192,7 +192,7 @@ TopBar 의 검색 input 은 controlled 입력. state 와 `⌘K`/`Ctrl+K` 전역 
 - **결합**: 뷰·프로젝트 필터에 AND. 검색은 client-only state — URL 에 넣지 않음 (뷰 전환·새로고침 시 리셋).
 - **키보드**: `⌘K`/`Ctrl+K` → input focus + select. Esc → 검색어 비우고 blur (input 의 onKeyDown 이 처리).
 - **빈 상태**: 검색 활성 + 0 결과면 뷰별 메시지 대신 "검색 결과가 없습니다" + 검색어 mono 라벨. today 뷰에서도 hour grid 대신 EmptyState 분기.
-- **subtitle 표식**: 검색 활성 시 TopBar subtitle 앞에 `검색: "{query}" · ...` 추가.
+- **활성 표식**: 노출된 input 자체가 표식이라 subtitle 에 중복 prefix 는 두지 않는다 (TopBar subtitle 은 항상 `{context} · N tasks`). project / tag 필터의 인라인 chips 와 같은 layer 에서 컨텍스트를 노출.
 
 ## Not in scope (don't add unprompted)
 
