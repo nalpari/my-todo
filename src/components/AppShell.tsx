@@ -13,6 +13,50 @@ import { useApp } from "@/lib/AppContext";
 import { toISODate } from "@/lib/data";
 import { parseView, toggleViewHref, type ViewKey } from "@/lib/view";
 
+/**
+ * 뷰별 새 task 의 due_date 기본값.
+ *  - today    → 오늘
+ *  - upcoming → 내일
+ *  - inbox    → null (미할당)
+ *  - someday  → 오늘 + 8일 (예정 윈도우 너머의 첫 날)
+ *  - done     → 오늘 (의미 모호하지만 일관 fallback)
+ */
+function viewDefaultDueDate(view: ViewKey, today: Date): string | null {
+  switch (view) {
+    case "today":
+      return toISODate(today);
+    case "upcoming": {
+      const d = new Date(today);
+      d.setDate(today.getDate() + 1);
+      return toISODate(d);
+    }
+    case "inbox":
+      return null;
+    case "someday": {
+      const d = new Date(today);
+      d.setDate(today.getDate() + 8);
+      return toISODate(d);
+    }
+    case "done":
+      return toISODate(today);
+  }
+}
+
+/** InputBar 우측 칩에 노출할 짧은 라벨. due_date 기본값을 사람-친화 표기로. */
+function viewDefaultDueLabel(view: ViewKey): string {
+  switch (view) {
+    case "today":
+    case "done":
+      return "오늘";
+    case "upcoming":
+      return "내일";
+    case "inbox":
+      return "미할당";
+    case "someday":
+      return "나중에";
+  }
+}
+
 export type DisplayUser = { name: string; email: string; avatarUrl?: string };
 
 type SidebarProps = { compact?: boolean; user: DisplayUser };
@@ -112,6 +156,11 @@ export const AppSidebar = ({ compact = false, user }: SidebarProps) => {
  * 검색어가 있을 때만 우측 × clear 버튼 노출 (mousedown=preventDefault 로
  * input focus 유지 — 클릭 직후에도 계속 타이핑 가능).
  */
+/**
+ * 활성 필터를 인라인 chip 으로 노출 — 각 chip × 로 해당 차원만 해제.
+ * 검색 필터는 input 자체가 query 와 × 를 이미 보여주므로 chip 으로 중복하지 않음.
+ * subtitle 은 단순한 `{context} · N tasks` 로 유지 — 활성 필터의 식별은 chips 가 담당.
+ */
 export const AppTopBar = ({
   title,
   subtitle,
@@ -119,6 +168,10 @@ export const AppTopBar = ({
   searchQuery,
   onSearchChange,
   searchInputRef,
+  activeProject,
+  activeTag,
+  onClearProject,
+  onClearTag,
 }: {
   title: string;
   subtitle: string;
@@ -126,6 +179,10 @@ export const AppTopBar = ({
   searchQuery: string;
   onSearchChange: (value: string) => void;
   searchInputRef: React.RefObject<HTMLInputElement | null>;
+  activeProject: { id: string; name: string; color: string } | null;
+  activeTag: { id: string; name: string; hue: "accent" | "muted" } | null;
+  onClearProject: () => void;
+  onClearTag: () => void;
 }) => {
   return (
     <div style={{ ...S.topbar, padding: dense ? "14px 32px" : "20px 40px" }}>
@@ -133,7 +190,23 @@ export const AppTopBar = ({
         <h1 style={S.topTitle}>{title}</h1>
         <span style={S.topSub}>{subtitle}</span>
       </div>
-      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 10, flexShrink: 0 }}>
+        {activeProject && (
+          <FilterChip
+            label={activeProject.name}
+            colorDot={activeProject.color}
+            ariaLabel={`프로젝트 ${activeProject.name} 필터 해제`}
+            onClear={onClearProject}
+          />
+        )}
+        {activeTag && (
+          <FilterChip
+            label={`#${activeTag.name}`}
+            hue={activeTag.hue}
+            ariaLabel={`#${activeTag.name} 태그 필터 해제`}
+            onClear={onClearTag}
+          />
+        )}
         <label style={S.search}>
           <svg width="13" height="13" viewBox="0 0 16 16" fill="none" style={{ opacity: 0.5, flexShrink: 0 }} aria-hidden="true">
             <circle cx="7" cy="7" r="4.5" stroke="currentColor" strokeWidth="1.4" />
@@ -155,7 +228,6 @@ export const AppTopBar = ({
             placeholder="할 일, 프로젝트 검색"
             aria-label="검색"
             autoComplete="off"
-            // 일부 브라우저의 type=search 기본 X 버튼 제거 (자체 × 사용)
             style={S.searchInput}
           />
           {searchQuery ? (
@@ -175,18 +247,66 @@ export const AppTopBar = ({
             </span>
           )}
         </label>
-        <button style={S.filterBtn} type="button">
-          <span>필터</span>
-          <span style={{ color: "var(--accent)" }}>· 2</span>
-        </button>
       </div>
     </div>
   );
 };
 
+/* ─── FilterChip (TopBar 활성 필터 표시) ─────────────────── */
+
+/**
+ * project 면 colorDot, tag 면 hue 에 따른 accent/muted 스타일.
+ * 둘 다 안 주면 중성 회색 (확장 대비).
+ */
+const FilterChip = ({
+  label,
+  colorDot,
+  hue,
+  ariaLabel,
+  onClear,
+}: {
+  label: string;
+  colorDot?: string;
+  hue?: "accent" | "muted";
+  ariaLabel: string;
+  onClear: () => void;
+}) => {
+  const isAccent = hue === "accent";
+  const palette: CSSProperties = isAccent
+    ? { border: "1px solid var(--border-accent)", background: "var(--accent-dim)", color: "var(--accent-bright)" }
+    : { border: "1px solid var(--border)", background: "rgba(255,255,255,0.04)", color: "var(--text-secondary)" };
+
+  return (
+    <span style={{ ...S.filterChip, ...palette }}>
+      {colorDot && (
+        <span aria-hidden="true" style={{ width: 6, height: 6, borderRadius: 2, background: colorDot, flexShrink: 0 }} />
+      )}
+      <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 140 }}>
+        {label}
+      </span>
+      <button
+        type="button"
+        aria-label={ariaLabel}
+        onClick={onClear}
+        style={S.filterChipClear}
+      >
+        ×
+      </button>
+    </span>
+  );
+};
+
 /* ─── InputBar (활성화) ─────────────────────────────────────── */
 
-export const InputBar = ({ floating = false }: { floating?: boolean }) => {
+export const InputBar = ({
+  floating = false,
+  view = "today",
+  defaultProjectId = null,
+}: {
+  floating?: boolean;
+  view?: ViewKey;
+  defaultProjectId?: string | null;
+}) => {
   const formRef = useRef<HTMLFormElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const [value, setValue] = useState("");
@@ -199,9 +319,14 @@ export const InputBar = ({ floating = false }: { floating?: boolean }) => {
     const trimmed = value.trim();
     if (!trimmed) return;
 
+    // 뷰·필터 컨텍스트에서 새 task 가 어디에 속할지 자연스럽게 추론.
+    // 사용자가 "예정" 보는 중에 추가 → 내일, "프로젝트 X" 필터 중 추가 → X 에 속함.
+    const dueDate = viewDefaultDueDate(view, new Date());
+
     const fd = new FormData();
     fd.set("title", trimmed);
-    fd.set("due_date", toISODate(new Date())); // 기본: 오늘
+    if (dueDate) fd.set("due_date", dueDate);
+    if (defaultProjectId) fd.set("project_id", defaultProjectId);
 
     // 낙관적으로 input 을 비우되, 실패 시 복원해서 사용자 입력 손실을 막는다.
     setValue("");
@@ -236,7 +361,7 @@ export const InputBar = ({ floating = false }: { floating?: boolean }) => {
         autoComplete="off"
       />
       <div style={S.inputChips}>
-        <span style={S.chipAccent}>오늘</span>
+        <span style={S.chipAccent}>{viewDefaultDueLabel(view)}</span>
       </div>
       <span style={{ display: "flex", gap: 4 }}>
         <KeyHint>↵</KeyHint>
@@ -343,12 +468,23 @@ const S: Record<string, CSSProperties> = {
     display: "flex", alignItems: "center", justifyContent: "center",
     flexShrink: 0,
   },
-  filterBtn: {
-    display: "flex", alignItems: "center", gap: 6,
-    padding: "8px 12px", borderRadius: "var(--radius)",
-    border: "1px solid var(--border)",
-    background: "transparent", color: "var(--text-secondary)",
-    fontSize: 13, cursor: "pointer",
+  filterChip: {
+    display: "inline-flex", alignItems: "center", gap: 6,
+    padding: "5px 4px 5px 10px",
+    borderRadius: "var(--radius-full)",
+    fontFamily: "var(--font-mono)", fontSize: 11,
+    letterSpacing: 0.3,
+    flexShrink: 0,
+  },
+  filterChipClear: {
+    width: 16, height: 16, borderRadius: "50%",
+    background: "transparent",
+    border: "none",
+    color: "inherit", cursor: "pointer",
+    fontSize: 13, lineHeight: 1, padding: 0,
+    display: "flex", alignItems: "center", justifyContent: "center",
+    opacity: 0.7,
+    flexShrink: 0,
   },
 
   inputBar: {

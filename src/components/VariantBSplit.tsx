@@ -2,7 +2,7 @@
 
 import type { CSSProperties } from "react";
 import { useState, useEffect, useRef } from "react";
-import { useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { Checkbox, MonoLabel, ProjectDot } from "./Primitives";
 import { AppSidebar, AppTopBar, InputBar, type DisplayUser } from "./AppShell";
 import { MiniCalendar, SubtaskMeter } from "./TaskRow";
@@ -16,6 +16,8 @@ import {
   parseView,
   parseProjectId,
   parseTagId,
+  toggleProjectHref,
+  toggleTagHref,
   filterTasks,
   filterBySearch,
   viewTitle,
@@ -98,6 +100,7 @@ function useLiveClock() {
 const VariantBSplitInner = ({ user }: { user: DisplayUser }) => {
   const now = useLiveClock();
   const { tasks: allTasks, projects, tags } = useApp();
+  const router = useRouter();
   const searchParams = useSearchParams();
 
   const view = parseView(searchParams.get("view"));
@@ -105,6 +108,15 @@ const VariantBSplitInner = ({ user }: { user: DisplayUser }) => {
   const activeProject = activeProjectId ? projects.find((p) => p.id === activeProjectId) ?? null : null;
   const activeTagId = parseTagId(searchParams.get("tag"));
   const activeTag = activeTagId ? tags.find((t) => t.id === activeTagId) ?? null : null;
+
+  const clearProject = () => {
+    if (!activeProjectId) return;
+    router.replace(toggleProjectHref(new URLSearchParams(searchParams.toString()), activeProjectId), { scroll: false });
+  };
+  const clearTag = () => {
+    if (!activeTagId) return;
+    router.replace(toggleTagHref(new URLSearchParams(searchParams.toString()), activeTagId), { scroll: false });
+  };
 
   // 검색은 URL 에 넣지 않는 client-only state (Round 3 Q2-e). 뷰 전환·새로고침 시 리셋.
   const [searchQuery, setSearchQuery] = useState("");
@@ -136,14 +148,11 @@ const VariantBSplitInner = ({ user }: { user: DisplayUser }) => {
   const today = now;
   const todayISO = toISODate(today);
 
-  // TopBar 라벨 — 활성 필터들을 subtitle 끝에 chain append. 검색은 prefix.
+  // TopBar subtitle 은 `{context} · N tasks` 만. 활성 필터의 식별은 TopBar 의
+  // chips 와 search input 자체가 담당 — subtitle 에서 중복 제거.
   const title = viewTitle(view);
   const subtitleContext = viewSubtitleContext(view, today);
-  const filterSuffix =
-    (activeProject ? ` · ${activeProject.name}` : "") +
-    (activeTag ? ` · #${activeTag.name}` : "");
-  const baseSubtitle = `${subtitleContext} · ${visibleTasks.length} tasks${filterSuffix}`;
-  const subtitle = isSearching ? `검색: "${searchQuery.trim()}" · ${baseSubtitle}` : baseSubtitle;
+  const subtitle = `${subtitleContext} · ${visibleTasks.length} tasks`;
 
   // 중앙 분기 — 검색 활성 + 0 결과면 EmptyState (뷰별 메시지 부적절).
   // 그 외엔 view==="today" → TodayTimeline (시간 0개도 "all clear" 유지), else → TaskList.
@@ -175,6 +184,10 @@ const VariantBSplitInner = ({ user }: { user: DisplayUser }) => {
           searchQuery={searchQuery}
           onSearchChange={setSearchQuery}
           searchInputRef={searchInputRef}
+          activeProject={activeProject ? { id: activeProject.id, name: activeProject.name, color: activeProject.color } : null}
+          activeTag={activeTag ? { id: activeTag.id, name: activeTag.name, hue: activeTag.hue } : null}
+          onClearProject={clearProject}
+          onClearTag={clearTag}
         />
 
         <div style={{ display: "grid", gridTemplateColumns: "1fr 320px", flex: 1, minHeight: 0 }}>
@@ -185,7 +198,7 @@ const VariantBSplitInner = ({ user }: { user: DisplayUser }) => {
               <div style={{ height: 100 }} />
             </div>
 
-            <InputBar floating />
+            <InputBar floating view={view} defaultProjectId={activeProjectId} />
           </div>
 
           {/* RIGHT RAIL — 뷰와 무관하게 일관 (Q4-f) */}
