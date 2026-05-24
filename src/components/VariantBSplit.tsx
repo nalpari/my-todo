@@ -1,14 +1,28 @@
 "use client";
 
 import type { CSSProperties } from "react";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { Checkbox, MonoLabel, ProjectDot } from "./Primitives";
 import { AppSidebar, AppTopBar, InputBar, type DisplayUser } from "./AppShell";
 import { MiniCalendar, SubtaskMeter } from "./TaskRow";
+import { TaskList, EmptyState } from "./TaskList";
+import { TaskTagsEditor } from "./TaskTagsEditor";
+import { SubtaskList } from "./SubtaskList";
 import { AppProvider, useApp } from "@/lib/AppContext";
 import { toISODate, type Task } from "@/lib/data";
 import { type AppData } from "@/lib/queries";
-import { TagChip } from "./Primitives";
+import {
+  parseView,
+  parseProjectId,
+  parseTagId,
+  toggleProjectHref,
+  toggleTagHref,
+  filterTasks,
+  filterBySearch,
+  viewTitle,
+  viewSubtitleContext,
+} from "@/lib/view";
 
 /* ─── ErrorToast ────────────────────────────────────────────── */
 const ErrorToast = () => {
@@ -85,21 +99,181 @@ function useLiveClock() {
 /* ─── 내부 컴포넌트 (AppProvider 안) ─────────────────────────── */
 const VariantBSplitInner = ({ user }: { user: DisplayUser }) => {
   const now = useLiveClock();
-  const { tasks, projects } = useApp();
+  const { tasks: allTasks, projects, tags } = useApp();
+  const router = useRouter();
+  const searchParams = useSearchParams();
+
+  const view = parseView(searchParams.get("view"));
+  const activeProjectId = parseProjectId(searchParams.get("project"));
+  const activeProject = activeProjectId ? projects.find((p) => p.id === activeProjectId) ?? null : null;
+  const activeTagId = parseTagId(searchParams.get("tag"));
+  const activeTag = activeTagId ? tags.find((t) => t.id === activeTagId) ?? null : null;
+
+  const clearProject = () => {
+    if (!activeProjectId) return;
+    router.replace(toggleProjectHref(new URLSearchParams(searchParams.toString()), activeProjectId), { scroll: false });
+  };
+  const clearTag = () => {
+    if (!activeTagId) return;
+    router.replace(toggleTagHref(new URLSearchParams(searchParams.toString()), activeTagId), { scroll: false });
+  };
+
+  // 검색은 URL 에 넣지 않는 client-only state (Round 3 Q2-e). 뷰 전환·새로고침 시 리셋.
+  const [searchQuery, setSearchQuery] = useState("");
+  const searchInputRef = useRef<HTMLInputElement | null>(null);
+  const isSearching = searchQuery.trim().length > 0;
+
+  // ⌘K (mac) / Ctrl+K (Win) → 검색 input 포커스. 입력 중인 다른 input/textarea 가
+  // 있어도 우선 — 어느 곳에서든 검색으로 점프. Esc 는 input 의 onKeyDown 이 처리.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && (e.key === "k" || e.key === "K")) {
+        e.preventDefault();
+        searchInputRef.current?.focus();
+        searchInputRef.current?.select();
+      }
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, []);
+
+  // 필터 체인: view → project → tag → search. 우측 rail 의 다가오는 일정·분포
+  // 차트는 의도적으로 전역 allTasks 사용 — 필터·검색 컨텍스트와 독립된 peripheral view.
+  const visibleTasks = filterBySearch(
+    filterTasks(allTasks, view, activeProjectId, activeTagId),
+    searchQuery,
+    projects,
+  );
 
   const today = now;
   const todayISO = toISODate(today);
 
-  // 오늘 태스크 (타임라인용)
-  const todayTasks = tasks.filter((t) => t.due_date === todayISO);
-  // 다가오는 태스크 (오늘 이후 미완료 4개)
-  const upcomingTasks = tasks
-    .filter((t) => t.due_date && t.due_date > todayISO && !t.done)
-    .sort((a, b) => (a.due_date ?? "").localeCompare(b.due_date ?? ""))
-    .slice(0, 4);
+  // TopBar subtitle 은 `{context} · N tasks` 만. 활성 필터의 식별은 TopBar 의
+  // chips 와 search input 자체가 담당 — subtitle 에서 중복 제거.
+  const title = viewTitle(view);
+  const subtitleContext = viewSubtitleContext(view, today);
+  const subtitle = `${subtitleContext} · ${visibleTasks.length} tasks`;
 
-  const doneTasks = tasks.filter((t) => t.done).length;
-  const totalTasks = tasks.length;
+  // 중앙 분기 — 검색 활성 + 0 결과면 EmptyState (뷰별 메시지 부적절).
+  // 그 외엔 view==="today" → TodayTimeline (시간 0개도 "all clear" 유지), else → TaskList.
+  const renderCenter = () => {
+    if (isSearching && visibleTasks.length === 0) {
+      return <EmptyState primary="검색 결과가 없습니다" mono={`"${searchQuery.trim()}"`} />;
+    }
+    if (view === "today") {
+      return (
+        <TodayTimeline
+          visibleTasks={visibleTasks}
+          today={today}
+          now={now}
+          todayISO={todayISO}
+        />
+      );
+    }
+    return <TaskList tasks={visibleTasks} view={view} today={today} />;
+  };
+
+  return (
+    <div style={S.appRoot}>
+      <AppSidebar user={user} />
+      <div style={S.colMain}>
+        <AppTopBar
+          title={title}
+          subtitle={subtitle}
+          dense
+          searchQuery={searchQuery}
+          onSearchChange={setSearchQuery}
+          searchInputRef={searchInputRef}
+          activeProject={activeProject ? { id: activeProject.id, name: activeProject.name, color: activeProject.color } : null}
+          activeTag={activeTag ? { id: activeTag.id, name: activeTag.name, hue: activeTag.hue } : null}
+          onClearProject={clearProject}
+          onClearTag={clearTag}
+        />
+
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 320px", flex: 1, minHeight: 0 }}>
+          {/* CENTER — view 에 따라 분기 */}
+          <div style={{ ...S.scrollPad, paddingRight: 16 }} className="no-scrollbar">
+            <div style={{ padding: "24px 32px 0" }}>
+              {renderCenter()}
+              <div style={{ height: 100 }} />
+            </div>
+
+            <InputBar floating view={view} defaultProjectId={activeProjectId} />
+          </div>
+
+          {/* RIGHT RAIL — 뷰와 무관하게 일관 (Q4-f) */}
+          <aside style={S.rightRail}>
+            <MiniCalendar />
+
+            <div>
+              <div style={S.railHead}>
+                <MonoLabel tracking={1.5}>다가오는 일정</MonoLabel>
+                <a href="#" style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--accent)", textDecoration: "none", letterSpacing: 0.5 }}>
+                  전체 ↗
+                </a>
+              </div>
+              <UpcomingRail allTasks={allTasks} todayISO={todayISO} />
+            </div>
+
+            <div>
+              <div style={S.railHead}>
+                <MonoLabel tracking={1.5}>이번 주 진행률</MonoLabel>
+              </div>
+              <ProgressCard
+                done={allTasks.filter((t) => t.done).length}
+                total={allTasks.length}
+              />
+            </div>
+
+            <div>
+              <div style={S.railHead}>
+                <MonoLabel tracking={1.5}>프로젝트별 분포</MonoLabel>
+              </div>
+              <div style={{ padding: 14, borderRadius: "var(--radius)", border: "1px solid var(--border)", background: "var(--bg-surface)", display: "flex", flexDirection: "column", gap: 10 }}>
+                {projects.map((p) => (
+                  <div key={p.id} style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                    <span style={{ width: 8, height: 8, borderRadius: 2, background: p.color }} />
+                    <span style={{ fontSize: 12.5, color: "var(--text-secondary)", flex: 1, letterSpacing: -0.1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                      {p.name}
+                    </span>
+                    <div style={{ width: 60, height: 3, borderRadius: 2, background: "rgba(255,255,255,0.06)", overflow: "hidden" }}>
+                      <div style={{ width: `${Math.min(100, p.count * 12)}%`, height: "100%", background: p.color, opacity: 0.7 }} />
+                    </div>
+                    <span style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--text-faint)", minWidth: 16, textAlign: "right" }}>
+                      {p.count}
+                    </span>
+                  </div>
+                ))}
+                {projects.length === 0 && (
+                  <div style={{ fontSize: 12, color: "var(--text-faint)" }}>프로젝트 없음</div>
+                )}
+              </div>
+            </div>
+          </aside>
+        </div>
+      </div>
+      <ErrorToast />
+    </div>
+  );
+};
+
+/* ─── TodayTimeline ─────────────────────────────────────────
+ * 기존 hour-timeline 로직을 분리. visibleTasks 는 이미 (오늘+overdue + 프로젝트
+ * 필터 + 검색) 적용된 상태. todayTasks 는 시간 그리드에 들어갈 due_date === 오늘 만.
+ * overdue 는 카운트만 헤더에 표시 (시간 그리드에 자리 없음 — 기존 동작 유지).
+ */
+const TodayTimeline = ({
+  visibleTasks,
+  today,
+  now,
+  todayISO,
+}: {
+  visibleTasks: Task[];
+  today: Date;
+  now: Date;
+  todayISO: string;
+}) => {
+  const todayTasks = visibleTasks.filter((t) => t.due_date === todayISO);
 
   // KO 요일
   const KO_DOW = ["일", "월", "화", "수", "목", "금", "토"];
@@ -143,134 +317,88 @@ const VariantBSplitInner = ({ user }: { user: DisplayUser }) => {
     const th = parseInt(t.due_time.split(":")[0] ?? "", 10);
     return !Number.isFinite(th);
   });
-  const overdueTask = tasks.filter((t) => t.bucket === "overdue");
+  // overdue 는 필터 컨텍스트 안의 것만 카운트 (visibleTasks 가 이미 필터됨)
+  const overdueTask = visibleTasks.filter((t) => t.bucket === "overdue");
 
-  const topbarSubtitle = `May ${today.getDate()} · ${tasks.filter((t) => t.bucket === "today").length} tasks`;
+  // 전체 todayTasks 가 0 일 때 빈 상태 — 시간 그리드는 그래도 그리지만 헤더 분위기만 변화.
+  // (TaskList 의 EmptyState 와 달리 timeline 은 시간 자체가 컨텐츠라 유지)
+  const hasAny = todayTasks.length > 0 || overdueTask.length > 0 || untimedTasks.length > 0;
 
   return (
-    <div style={S.appRoot}>
-      <AppSidebar active="today" user={user} />
-      <div style={S.colMain}>
-        <AppTopBar title="이번 주" subtitle={topbarSubtitle} dense />
-
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 320px", flex: 1, minHeight: 0 }}>
-          {/* CENTER — hour timeline */}
-          <div style={{ ...S.scrollPad, paddingRight: 16 }} className="no-scrollbar">
-            <div style={{ padding: "24px 32px 0" }}>
-              {/* editorial today header */}
-              <div style={{ display: "flex", alignItems: "baseline", gap: 18, marginBottom: 20 }}>
-                <div
-                  style={{
-                    fontFamily: "var(--font-display)", fontStyle: "italic",
-                    fontVariationSettings: '"opsz" 144, "wght" 320',
-                    fontSize: 72, lineHeight: 0.9,
-                    color: "var(--text-display)", letterSpacing: -2.5,
-                  }}
-                >
-                  {enDow}
-                </div>
-                <div>
-                  <div style={{ fontSize: 16, color: "var(--text-secondary)", fontWeight: 500, marginBottom: 2 }}>
-                    {dateStr}
-                  </div>
-                  <MonoLabel tracking={1.4}>
-                    {String(todayTasks.length).padStart(2, "0")} tasks
-                    {overdueTask.length > 0 ? ` · ${overdueTask.length} overdue` : ""}
-                  </MonoLabel>
-                </div>
-              </div>
-
-              {/* 시간 없는 오늘 태스크 */}
-              {untimedTasks.length > 0 && (
-                <div style={{ marginBottom: 16 }}>
-                  <div style={{ marginBottom: 8 }}>
-                    <MonoLabel size={10} tracking={1.4}>시간 미지정</MonoLabel>
-                  </div>
-                  <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                    {untimedTasks.map((t) => (
-                      <TimelineCard key={t.id} task={t} />
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {/* hour timeline */}
-              <div style={{ display: "flex", flexDirection: "column" }}>
-                {hours.map((h) => (
-                  <HourRow
-                    key={h}
-                    hour={h}
-                    nowLine={nowHour >= minHour && nowHour <= maxHour && h === nowRowHour}
-                    nowTimeStr={nowMinStr}
-                    tasks={tasksByHour(h)}
-                  />
-                ))}
-              </div>
-
-              <div style={{ height: 100 }} />
-            </div>
-
-            <InputBar floating />
+    <>
+      {/* editorial today header */}
+      <div style={{ display: "flex", alignItems: "baseline", gap: 18, marginBottom: 20 }}>
+        <div
+          style={{
+            fontFamily: "var(--font-display)", fontStyle: "italic",
+            fontVariationSettings: '"opsz" 144, "wght" 320',
+            fontSize: 72, lineHeight: 0.9,
+            color: "var(--text-display)", letterSpacing: -2.5,
+          }}
+        >
+          {enDow}
+        </div>
+        <div>
+          <div style={{ fontSize: 16, color: "var(--text-secondary)", fontWeight: 500, marginBottom: 2 }}>
+            {dateStr}
           </div>
-
-          {/* RIGHT RAIL */}
-          <aside style={S.rightRail}>
-            <MiniCalendar />
-
-            <div>
-              <div style={S.railHead}>
-                <MonoLabel tracking={1.5}>다가오는 일정</MonoLabel>
-                <a href="#" style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--accent)", textDecoration: "none", letterSpacing: 0.5 }}>
-                  전체 ↗
-                </a>
-              </div>
-              <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                {upcomingTasks.map((t) => (
-                  <UpcomingItem key={t.id} task={t} />
-                ))}
-                {upcomingTasks.length === 0 && (
-                  <div style={{ fontSize: 12, color: "var(--text-faint)", padding: "8px 10px" }}>
-                    다가오는 일정이 없습니다
-                  </div>
-                )}
-              </div>
-            </div>
-
-            <div>
-              <div style={S.railHead}>
-                <MonoLabel tracking={1.5}>이번 주 진행률</MonoLabel>
-              </div>
-              <ProgressCard done={doneTasks} total={totalTasks} />
-            </div>
-
-            <div>
-              <div style={S.railHead}>
-                <MonoLabel tracking={1.5}>프로젝트별 분포</MonoLabel>
-              </div>
-              <div style={{ padding: 14, borderRadius: "var(--radius)", border: "1px solid var(--border)", background: "var(--bg-surface)", display: "flex", flexDirection: "column", gap: 10 }}>
-                {projects.map((p) => (
-                  <div key={p.id} style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                    <span style={{ width: 8, height: 8, borderRadius: 2, background: p.color }} />
-                    <span style={{ fontSize: 12.5, color: "var(--text-secondary)", flex: 1, letterSpacing: -0.1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                      {p.name}
-                    </span>
-                    <div style={{ width: 60, height: 3, borderRadius: 2, background: "rgba(255,255,255,0.06)", overflow: "hidden" }}>
-                      <div style={{ width: `${Math.min(100, p.count * 12)}%`, height: "100%", background: p.color, opacity: 0.7 }} />
-                    </div>
-                    <span style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--text-faint)", minWidth: 16, textAlign: "right" }}>
-                      {p.count}
-                    </span>
-                  </div>
-                ))}
-                {projects.length === 0 && (
-                  <div style={{ fontSize: 12, color: "var(--text-faint)" }}>프로젝트 없음</div>
-                )}
-              </div>
-            </div>
-          </aside>
+          <MonoLabel tracking={1.4}>
+            {String(todayTasks.length).padStart(2, "0")} tasks
+            {overdueTask.length > 0 ? ` · ${overdueTask.length} overdue` : ""}
+            {!hasAny ? " · all clear" : ""}
+          </MonoLabel>
         </div>
       </div>
-      <ErrorToast />
+
+      {/* 시간 없는 오늘 태스크 */}
+      {untimedTasks.length > 0 && (
+        <div style={{ marginBottom: 16 }}>
+          <div style={{ marginBottom: 8 }}>
+            <MonoLabel size={10} tracking={1.4}>시간 미지정</MonoLabel>
+          </div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+            {untimedTasks.map((t) => (
+              <TimelineCard key={t.id} task={t} />
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* hour timeline */}
+      <div style={{ display: "flex", flexDirection: "column" }}>
+        {hours.map((h) => (
+          <HourRow
+            key={h}
+            hour={h}
+            nowLine={nowHour >= minHour && nowHour <= maxHour && h === nowRowHour}
+            nowTimeStr={nowMinStr}
+            tasks={tasksByHour(h)}
+          />
+        ))}
+      </div>
+    </>
+  );
+};
+
+/* ─── UpcomingRail ──────────────────────────────────────── */
+const UpcomingRail = ({ allTasks, todayISO }: { allTasks: Task[]; todayISO: string }) => {
+  const upcomingTasks = allTasks
+    .filter((t) => t.due_date && t.due_date > todayISO && !t.done)
+    .sort((a, b) => (a.due_date ?? "").localeCompare(b.due_date ?? ""))
+    .slice(0, 4);
+
+  if (upcomingTasks.length === 0) {
+    return (
+      <div style={{ fontSize: 12, color: "var(--text-faint)", padding: "8px 10px" }}>
+        다가오는 일정이 없습니다
+      </div>
+    );
+  }
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+      {upcomingTasks.map((t) => (
+        <UpcomingItem key={t.id} task={t} />
+      ))}
     </div>
   );
 };
@@ -318,10 +446,18 @@ const NowLine = ({ timeStr }: { timeStr: string }) => (
 
 const TimelineCard = ({ task }: { task: Task }) => {
   const { projects, toggleTask, deleteTask, updateTaskTitle } = useApp();
-  const project = task.project ? projects.find((p) => p.id === task.project) : null;
+  const project = task.projectId ? projects.find((p) => p.id === task.projectId) : null;
   const [hovered, setHovered] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
   const [editValue, setEditValue] = useState(task.title);
+  const [expanded, setExpanded] = useState(false);
+
+  // TaskRow 와 동일 패턴 — render-during-render 로 외부 title 변경분을 흡수.
+  const [lastSeenTitle, setLastSeenTitle] = useState(task.title);
+  if (task.title !== lastSeenTitle) {
+    setLastSeenTitle(task.title);
+    if (!isEditing) setEditValue(task.title);
+  }
 
   const handleBlur = () => {
     setIsEditing(false);
@@ -346,11 +482,11 @@ const TimelineCard = ({ task }: { task: Task }) => {
     >
       <span style={{ width: 3, alignSelf: "stretch", borderRadius: 2, background: project ? project.color : "var(--text-faint)" }} />
       <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ display: "flex", alignItems: "baseline", gap: 8, marginBottom: 3 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 3, flexWrap: "wrap" }}>
           <span style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--text-muted)", letterSpacing: 0.5 }}>
             {project?.name}
           </span>
-          {task.tags.map((t) => <TagChip key={t} id={t} small />)}
+          <TaskTagsEditor taskId={task.id} tags={task.tags} active={hovered} />
         </div>
         {isEditing ? (
           <input
@@ -374,9 +510,15 @@ const TimelineCard = ({ task }: { task: Task }) => {
         )}
         {task.subtotal > 0 && (
           <div style={{ marginTop: 6 }}>
-            <SubtaskMeter total={task.subtotal} done={task.subdone} />
+            <SubtaskMeter
+              total={task.subtotal}
+              done={task.subdone}
+              expanded={expanded}
+              onClick={() => setExpanded((v) => !v)}
+            />
           </div>
         )}
+        {expanded && <SubtaskList taskId={task.id} />}
       </div>
       <Checkbox done={task.done} size={16} onClick={() => toggleTask(task.id, task.done)} />
       {hovered && (
@@ -396,7 +538,7 @@ const TimelineCard = ({ task }: { task: Task }) => {
 /* ─── Upcoming + progress (right rail) ─────────────────────── */
 const UpcomingItem = ({ task }: { task: Task }) => {
   const { projects } = useApp();
-  const project = task.project ? projects.find((p) => p.id === task.project) : null;
+  const project = task.projectId ? projects.find((p) => p.id === task.projectId) : null;
   const dueDate = task.due_date ? new Date(task.due_date + "T00:00:00") : null;
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 10px", borderRadius: "var(--radius-sm)", borderBottom: "1px solid var(--border)" }}>
@@ -413,7 +555,7 @@ const UpcomingItem = ({ task }: { task: Task }) => {
           {task.title}
         </div>
         <div style={{ marginTop: 3, display: "flex", gap: 6, alignItems: "center" }}>
-          <ProjectDot id={task.project} size={5} />
+          <ProjectDot id={task.projectId} size={5} />
           <span style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--text-faint)", letterSpacing: 0.3 }}>
             {project?.name}
           </span>

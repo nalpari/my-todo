@@ -8,9 +8,12 @@ import {
   type Project,
   type Tag,
   type Task,
+  type Subtask,
   type ProjectRow,
+  type SubtaskRow,
   type TaskRow,
   rowToTask,
+  rowToSubtask,
   toISODate,
 } from "@/lib/data";
 
@@ -57,10 +60,13 @@ export async function getTags(): Promise<Tag[]> {
 
 /**
  * 오늘 기준 -30일 ~ +60일 범위의 task를 가져온다.
- * task_tags 조인 포함.
+ * task_tags 조인 포함. tags 인자는 호출처가 미리 fetch 한 결과를 받아
+ * tag_id → Tag 객체 룩업에 사용 — rowToTask 단계에서 1회 매핑하므로
+ * 이후 렌더링에선 tags.find() 가 필요 없다.
  */
-export async function getTasks(today: Date): Promise<Task[]> {
+export async function getTasks(today: Date, tags: Tag[]): Promise<Task[]> {
   const supabase = await createClient();
+  const tagById = new Map(tags.map((t) => [t.id, t]));
 
   const from = new Date(today);
   from.setDate(today.getDate() - 30);
@@ -102,13 +108,37 @@ export async function getTasks(today: Date): Promise<Task[]> {
     ...(undatedResult.data ?? []),
   ] as (TaskRow & { task_tags: { tag_id: string }[] })[];
 
-  return combined.map((row) =>
-    rowToTask(
-      row,
-      row.task_tags.map((tt) => tt.tag_id),
-      today,
-    ),
-  );
+  return combined.map((row) => {
+    // tag_id → Tag 객체. 알 수 없는 id (e.g. tags fetch 와 task_tags fetch 사이의
+    // 경합) 는 조용히 무시 — 다음 revalidate 가 정정한다.
+    const resolved = row.task_tags
+      .map((tt) => tagById.get(tt.tag_id))
+      .filter((t): t is Tag => t !== undefined);
+    return rowToTask(row, resolved, today);
+  });
+}
+
+/* ─── Subtasks ──────────────────────────────────────────── */
+
+/**
+ * 사용자의 모든 subtasks 조회. task 의 -30..+60 윈도우와 무관하게 전부 가져옴 —
+ * subtask 는 양이 적고 task expand 시 즉시 보여야 하므로 클라이언트 메모리에
+ * 두는 게 자연스럽다 (TaskList 의 N+1 fetch 회피).
+ */
+export async function getSubtasks(): Promise<Subtask[]> {
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from("subtasks")
+    .select("*")
+    .order("sort_order")
+    .order("created_at");
+
+  if (error) {
+    console.error("[getSubtasks]", error.message);
+    return [];
+  }
+
+  return (data as SubtaskRow[]).map(rowToSubtask);
 }
 
 /* ─── 통합 조회 (page.tsx에서 1번 호출) ─────────────────────── */
@@ -117,21 +147,25 @@ export type AppData = {
   projects: Project[];
   tags: Tag[];
   tasks: Task[];
+  subtasks: Subtask[];
 };
 
 export async function getAppData(): Promise<AppData> {
   const today = new Date();
-  const [projects, tags, tasks] = await Promise.all([
+  // tasks 는 tag 객체를 인라인으로 들고 오므로 tags 를 먼저 fetch 한 뒤 주입.
+  // projects/subtasks 와는 병렬 가능.
+  const [projects, tags, subtasks] = await Promise.all([
     getProjects(),
     getTags(),
-    getTasks(today),
+    getSubtasks(),
   ]);
+  const tasks = await getTasks(today, tags);
 
   // 프로젝트별 미완료 task 수 계산
   const countMap = new Map<string, number>();
   for (const t of tasks) {
-    if (!t.done && t.project) {
-      countMap.set(t.project, (countMap.get(t.project) ?? 0) + 1);
+    if (!t.done && t.projectId) {
+      countMap.set(t.projectId, (countMap.get(t.projectId) ?? 0) + 1);
     }
   }
   const projectsWithCount = projects.map((p) => ({
@@ -139,5 +173,5 @@ export async function getAppData(): Promise<AppData> {
     count: countMap.get(p.id) ?? 0,
   }));
 
-  return { projects: projectsWithCount, tags, tasks };
+  return { projects: projectsWithCount, tags, tasks, subtasks };
 }

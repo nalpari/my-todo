@@ -2,7 +2,7 @@
 
 import type { CSSProperties, ReactNode } from "react";
 import { useApp } from "@/lib/AppContext";
-import { type DayBucket } from "@/lib/data";
+import { type DayBucket, type Tag } from "@/lib/data";
 
 /* ─── Checkbox ───────────────────────────────────────────── */
 export const Checkbox = ({
@@ -57,14 +57,28 @@ export const ProjectDot = ({ id, size = 7 }: { id: string | null; size?: number 
   );
 };
 
-export const TagChip = ({ id, small = false }: { id: string; small?: boolean }) => {
-  const { tags } = useApp();
-  const t = tags.find((tg) => tg.id === id);
-  if (!t) return null;
+/**
+ * onRemove 가 전달되면 chip 우상단에 작은 × 가 항상 노출됨 — 호출처가 "지금 편집 모드"
+ * 일 때만 prop 을 넘겨 visibility 를 제어 (TaskRow/TimelineCard 가 호버 상태에 따라 결정).
+ *
+ * task.tags 가 인라인 Tag 객체 배열이므로 chip 도 객체를 그대로 받는다 — 매번 tags.find()
+ * 룩업 없이 즉시 렌더.
+ */
+export const TagChip = ({
+  tag,
+  small = false,
+  onRemove,
+}: {
+  tag: Tag;
+  small?: boolean;
+  onRemove?: () => void;
+}) => {
+  const t = tag;
   const isAccent = t.hue === "accent";
   return (
     <span
       style={{
+        position: "relative",
         display: "inline-flex",
         alignItems: "center",
         padding: small ? "1px 7px" : "2px 8px",
@@ -79,6 +93,30 @@ export const TagChip = ({ id, small = false }: { id: string; small?: boolean }) 
       }}
     >
       {t.name}
+      {onRemove && (
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            onRemove();
+          }}
+          aria-label={`${t.name} 태그 제거`}
+          style={{
+            position: "absolute",
+            top: -6, right: -6,
+            width: 13, height: 13, borderRadius: "50%",
+            background: "var(--accent)",
+            border: "1px solid var(--accent-deep)",
+            color: "white",
+            fontSize: 9, lineHeight: 1, cursor: "pointer",
+            display: "flex", alignItems: "center", justifyContent: "center",
+            padding: 0,
+            boxShadow: "0 0 0 2px var(--bg-surface)",
+          }}
+        >
+          ×
+        </button>
+      )}
     </span>
   );
 };

@@ -97,7 +97,7 @@ Google OAuth 활성화 + 할 일 CRUD 구현 완료.
 
 ## DB 스키마 (CRUD 구현)
 
-DB 마이그레이션 SQL: `supabase/migrations/` (현재 `001_initial_schema.sql`, `002_rls_with_check.sql`, `003_tenant_isolation.sql`). 원격 적용은 Supabase MCP `apply_migration` 또는 Dashboard SQL Editor 사용. 002 는 001 의 UPDATE 정책에 `WITH CHECK` 를 추가해 소유권 이전 (`user_id` 변경) 공격을 막고, 003 은 외래키 차원의 cross-tenant 참조를 차단한다 (`tasks(project_id, user_id) → projects(id, user_id)` 복합 FK, `task_tags` 에 `user_id` 추가 후 task·tag 양쪽에 복합 FK, `due_time` HH:MM CHECK 제약).
+DB 마이그레이션 SQL: `supabase/migrations/` (현재 `001_initial_schema.sql`, `002_rls_with_check.sql`, `003_tenant_isolation.sql`, `004_projects_uniqueness.sql`, `005_tags_uniqueness.sql`, `006_subtasks.sql`). 원격 적용은 Supabase MCP `apply_migration` 또는 Dashboard SQL Editor 사용. 002 는 001 의 UPDATE 정책에 `WITH CHECK` 를 추가해 소유권 이전 (`user_id` 변경) 공격을 막고, 003 은 외래키 차원의 cross-tenant 참조를 차단한다 (`tasks(project_id, user_id) → projects(id, user_id)` 복합 FK, `task_tags` 에 `user_id` 추가 후 task·tag 양쪽에 복합 FK, `due_time` HH:MM CHECK 제약). 004/005 는 각각 `projects`/`tags` 에 `(user_id, name) UNIQUE` 제약 — 같은 사용자 내 동명 항목 차단, 위반 시 `23505` → 서버 액션이 "이미 사용 중인 이름입니다" 로 변환. 006 은 `subtasks` 테이블 (복합 FK + RLS) + `recalc_task_subtask_counts` 트리거를 추가해 `tasks.subtotal/subdone` 의 자동 정합성을 DB 레벨에서 보장.
 
 ### 테이블 구조
 
@@ -105,8 +105,9 @@ DB 마이그레이션 SQL: `supabase/migrations/` (현재 `001_initial_schema.sq
 |--------|------|
 | `public.projects` | 프로젝트 (user_id FK, name, color) |
 | `public.tags` | 태그 (user_id FK, name, hue: "accent"\|"muted") |
-| `public.tasks` | 할 일 (user_id FK, project_id FK, title, due_date DATE, due_time TEXT, done, subtotal, subdone, sort_order) |
+| `public.tasks` | 할 일 (user_id FK, project_id FK, title, due_date DATE, due_time TEXT, done, subtotal, subdone, sort_order). subtotal/subdone 은 트리거가 자동 유지 |
 | `public.task_tags` | N:M 조인 (task_id, tag_id) |
+| `public.subtasks` | 서브태스크 (task_id FK 복합, user_id FK, title, done, sort_order). ON DELETE CASCADE 로 부모 task 삭제 시 함께 제거 |
 
 모든 테이블에 RLS 활성화. `auth.uid() = user_id` 기반으로 사용자별 격리.
 
@@ -114,10 +115,20 @@ DB 마이그레이션 SQL: `supabase/migrations/` (현재 `001_initial_schema.sq
 
 | 파일 | 역할 |
 |------|------|
-| `src/lib/data.ts` | 타입 정의 (ProjectRow, TaskRow, Project, Tag, Task, BucketKey), 날짜 유틸 (toISODate, dateToBucket, buildWeek, buildDayBuckets, rowToTask) |
-| `src/lib/queries.ts` | RSC 서버에서 DB fetch (getProjects, getTags, getTasks, getAppData) |
-| `src/lib/AppContext.tsx` | Client 컨텍스트. `useOptimistic` 기반 낙관적 UI (toggleTask, deleteTask, updateTaskTitle). `AppProvider` + `useApp()` 훅 |
+| `src/lib/data.ts` | 타입 정의 (ProjectRow, TaskRow, Project, Tag, Task, **BucketKey** — `inbox` (due_date null) 와 `later` (today+7 너머) 분리), 날짜 유틸 (toISODate, dateToBucket, buildWeek, buildDayBuckets, rowToTask). Task 에 created_at/updated_at 포함 (TaskList 정렬용) |
+| `src/lib/queries.ts` | RSC 서버에서 DB fetch (getProjects, getTags, getTasks, getSubtasks, getAppData) |
+| `src/lib/palette.ts` | 프로젝트 색 팔레트 (`PROJECT_COLORS` 8색, `DEFAULT_PROJECT_COLOR`, `isProjectColor` 런타임 가드) — Server Action 검증과 사이드바 swatch picker 가 공유 |
+| `src/lib/view.ts` | 사이드바 view 라우팅 + 프로젝트·태그 필터 + 검색의 URL 직렬화·필터·정렬·라벨 헬퍼. `ViewKey`, `parseView`/`parseProjectId`/`parseTagId`, `toggleViewHref`/`toggleProjectHref`/`toggleTagHref` (동일 항목 재클릭 시 키 제거), `filterTasks(tasks, view, projectId, tagId)` (모두 AND), `filterBySearch` (title + project name case-insensitive substring), `sortTasksForView`, `viewTitle`/`viewSubtitleContext`/`viewEmptyMessage` |
+| `src/lib/AppContext.tsx` | Client 컨텍스트. `useOptimistic` reducer 가 task·project·tag·subtask 변이를 통합 관리. cascade 미러: `project.delete` → 소속 task.project=null / `tag.delete` → 모든 task.tags 에서 제거 / `task.delete` → 소속 subtasks 제거 / `subtask.create|toggle|delete` → 부모 task 의 subtotal/subdone 동기 갱신 (DB 트리거 결과 미러) |
 | `src/app/tasks/actions.ts` | Server Actions (createTask, toggleTask, updateTask, deleteTask) + `revalidatePath("/")` |
+| `src/app/projects/actions.ts` | Server Actions (createProject, updateProject, deleteProject). 동일 컨벤션 + `parseName` (trim·연속공백→1개·1-50자) + `parseColor` (`isProjectColor` enum 가드) + 23505 캐치 |
+| `src/app/tags/actions.ts` | Server Actions (createTag, deleteTag, assignTag, unassignTag). `parseName` (1-30자, project 보다 짧음) + `parseHue` (accent\|muted enum). assignTag 는 (task_id, tag_id) UNIQUE 위반 시 멱등 처리 (이미 할당된 상태로 간주, 성공 반환) |
+| `src/app/subtasks/actions.ts` | Server Actions (createSubtask, updateSubtask, deleteSubtask). 동일 컨벤션 + `parseTitle` (1-200자). updateSubtask 는 fields 화이트리스트 (title / done 만). subtotal/subdone 의 정합성은 DB 트리거가 담당 — action 코드는 subtasks 만 다룸 |
+| `src/components/ProjectList.tsx` | 사이드바 프로젝트 섹션 UI. ProjectRow 는 **이름 클릭 = 필터 토글** (URL `project` 키), 호버 ✎ = 인라인 편집 (blur=save, Esc=cancel), 색 dot = swatch popover, 호버 × = 2단계 삭제 (`정말? · N개 해제`). 활성 시 row 좌측 코랄 인디케이터 + bg 강조. NewProjectRow 는 `+` 버튼으로 펼침, 색 dot/swatch mousedown `preventDefault` 로 input focus 유지 |
+| `src/components/TagList.tsx` | 사이드바 태그 섹션 UI. SidebarTagChip 은 **클릭 = 필터 토글** (URL `tag` 키), 호버 chip → 우상단 × overlay → 2단계 확인 ("정말?" 텍스트 교체) → 삭제. NewTagRow 는 `+` 로 펼침, hue 라디오 (accent/muted) + 이름 input. rename/hue 변경 UI 없음 — 삭제 + 재생성으로 갈음 |
+| `src/components/TaskList.tsx` | 비-오늘 뷰의 중앙 컨텐츠. `upcoming` 은 일별 헤더로 그룹핑 (비어있는 날 생략), `inbox`/`someday`/`done` 은 평면 리스트. 정렬은 `sortTasksForView`. 빈 상태 메시지 뷰별, `emptyOverride` prop 으로 검색 등 외부 컨텍스트 메시지 주입 가능. 재사용 가능한 `<EmptyState />` export (TodayTimeline 도 사용) |
+| `src/components/TaskTagsEditor.tsx` | Task 의 태그 chips + 편집 컨트롤 공유 컴포넌트 (TaskRow editorial/card, TimelineCard 가 사용). `active=true` → 각 chip × overlay (unassign) + 마지막에 "+" 버튼. "+" 클릭 → 사용자의 모든 태그 popover, 클릭으로 toggle. chip × 가시성과 picker 가시성은 분리 (picker 열린 채 hover 떠도 picker 유지) |
+| `src/components/SubtaskList.tsx` | Task 의 펼침 영역 — 작은 checkbox + 제목 인라인 편집 + 호버 ×. NewSubtaskInput 은 항상 맨 아래 + 입력, Enter 후 포커스 유지 (연속 추가 편의), Esc clear. 2단계 확인 없음 — subtask 는 throwaway. TaskRow editorial/card 와 TimelineCard 가 공유 |
 
 ### CRUD 흐름
 
@@ -129,23 +140,68 @@ DB 마이그레이션 SQL: `supabase/migrations/` (현재 `001_initial_schema.sq
 
 ### 에러 처리 컨벤션 (tasks Server Action)
 
-- 모든 task Server Action 은 실패 시 **throw** 한다 (silent return 금지). DB 에러는 `throw new Error(...)`, 세션 만료는 `redirect("/login?error=session_expired")` (NEXT_REDIRECT 라 try/catch 로 감싸면 안 됨 — `requireUser()` 헬퍼에 일임).
+- 모든 task / project Server Action 은 실패 시 **throw** 한다 (silent return 금지). DB 에러는 `throw new Error(...)`, 세션 만료는 `redirect("/login?error=session_expired")` (NEXT_REDIRECT 라 try/catch 로 감싸면 안 됨 — `requireUser()` 헬퍼에 일임).
 - 클라이언트는 `AppContext` 의 `runAction` 헬퍼가 try/catch 로 잡아 (1) 에러 메시지를 `error` 상태에 기록, (2) `router.refresh()` 로 서버 상태를 다시 받아 낙관 잔존을 정정한다.
 - `VariantBSplit` 의 `<ErrorToast />` 는 `useApp().error` 를 구독해 하단 토스트로 표시 (4초 자동 닫힘 + 수동 ×). `InputBar` 도 createTask 실패 시 `reportError` + 입력값 복구.
 
 ### 입력 검증 컨벤션 (tasks Server Action)
 
 - Server Action 은 사실상 public RPC. TS 타입은 런타임 강제력이 없으므로 client 가 임의 키 (`user_id`, `sort_order` 등) 를 보낼 수 있다. `actions.ts` 의 `parseTitle`/`parseNullableDate`/`parseNullableTime`/`parseNullableUuid` 헬퍼가 키 화이트리스트 + 포맷 검증을 담당. `updateTask` 는 `fields: unknown` 으로 받고 명시된 4개 키만 update 객체에 옮긴다.
-- `project_id` 는 `assertOwnedProject` 로 사전 소유권 확인 후 update — 003 의 복합 FK 가 cross-tenant 참조를 어차피 거부하지만, 사용자에게 명확한 에러 메시지 제공.
+- 다른 user 소유 row 를 참조할 수 있는 모든 mutate (tasks 의 project_id, subtasks/task_tags 의 task_id) 는 `assertOwnedProject` / `assertOwnedTask` 로 사전 소유권 확인 후 진행. 003 의 복합 FK 가 cross-tenant 참조를 어차피 거부하지만, FK 위반 raw 메시지 대신 명확한 한국어 에러를 노출하기 위함. FK 위반 (23503) 은 `translateDbError` 가 "참조 대상을 찾을 수 없습니다" 로 변환.
+
+## 사이드바 view 라우팅 + 프로젝트·태그 필터
+
+URL state: `/?view=today&project=<uuid>&tag=<uuid>`. `view` 기본값은 `today`, 없으면 default — URL 에 명시하지 않아 깨끗하게 유지. `project`/`tag` 없으면 해당 차원 필터 없음. 동일 항목 재클릭 = URL 키 제거 (default 복귀 / 필터 해제). 모든 nav·프로젝트·태그 클릭은 `router.replace` (히스토리 폭증 방지). project 와 tag 는 직교 — 동시에 활성 가능 (e.g. "프로젝트 X 의 #urgent task").
+
+뷰 정의 (필터 + !done):
+- **today**: `bucket in [today, overdue]` (overdue 도 오늘 시각으로 표시 — 카운트는 헤더에 별도)
+- **upcoming**: `bucket in [tomorrow, day3..day7]`
+- **inbox**: `bucket === "inbox"` (due_date null)
+- **someday**: `bucket === "later"` (today+7 너머)
+- **done**: `done === true` (date 무시, 직교)
+
+레이아웃 분기: `view === "today"` → 기존 hour-timeline (분리된 `<TodayTimeline />` 서브컴포넌트), 그 외 → `<TaskList />`. 우측 rail (미니 캘린더 / 다가오는 일정 / 진행률 / 분포) 은 뷰·필터와 독립된 peripheral view 라 전역 `allTasks` 사용 — 의도된 컨텍스트 일관성.
+
+사이드바 nav 카운트는 **모든 필터 (프로젝트·태그) 를 무시한 전역 카운트** — 다른 뷰의 전체 task 가 몇 개인지 보여야 의미. "지금 보고 있는 뷰 + 필터 결과 수" 는 TopBar subtitle 이 담당 (`{context} · N tasks`). 활성 필터의 식별은 TopBar 의 인라인 chips (project / tag) 와 search input 자체가 노출 — chip × 한 번으로 해당 차원만 해제.
+
+## InputBar 의 컨텍스트 추론
+
+`<InputBar />` 는 현재 view·activeProjectId 를 받아 새 task 의 기본 due_date 와 project_id 를 prefill:
+
+- view=today/done → due_date = 오늘
+- view=upcoming → 내일
+- view=inbox → null
+- view=someday → 오늘 + 8일
+- activeProjectId 있으면 project_id 자동 할당
+
+input 우측의 due 칩 라벨도 뷰별로 변경 (`오늘` / `내일` / `미할당` / `나중에`). 즉 "예정" 뷰에서 task 를 추가하면 자연스럽게 내일로, 프로젝트 X 필터 중 추가하면 X 에 속한다.
+
+## 서브태스크 (Subtasks)
+
+`subtasks` 테이블은 별도. tasks 테이블의 `subtotal`/`subdone` 컬럼은 그대로 두되 `recalc_task_subtask_counts` 트리거 (006) 가 subtasks 의 INSERT/UPDATE/DELETE 시 자동 재계산 — DB 가 정합성 보증. 따라서 server action 은 subtasks 만 다룬다.
+
+UI 는 **expand-in-place**: TaskRow editorial/card 와 TimelineCard 의 `SubtaskMeter` 가 클릭 가능한 chevron 토글로 작동. 펼쳐지면 본문 아래에 `<SubtaskList />` 렌더. 0 subtasks 인 task 는 호버 시 `+ 서브태스크` affordance 가 메타데이터 줄에 등장 — 클릭하면 expand. expand state 는 컴포넌트 local (URL X, 뷰 전환 시 리셋).
+
+낙관 reducer 의 subtask 케이스는 부모 task 의 subtotal/subdone 도 함께 갱신 — DB 트리거 결과의 미러. revalidate 가 동일 값을 다시 가져오므로 reconcile 충돌 없음.
+
+## 검색 (TopBar)
+
+TopBar 의 검색 input 은 controlled 입력. state 와 `⌘K`/`Ctrl+K` 전역 단축키는 `VariantBSplitInner` 가 소유. AppTopBar 는 `searchQuery`/`onSearchChange`/`searchInputRef` props 만 받는 순수 view.
+
+- **범위**: task title + project name (case-insensitive substring). 태그·due_date 는 1차 제외.
+- **결합**: 뷰·프로젝트 필터에 AND. 검색은 client-only state — URL 에 넣지 않음 (뷰 전환·새로고침 시 리셋).
+- **키보드**: `⌘K`/`Ctrl+K` → input focus + select. Esc → 검색어 비우고 blur (input 의 onKeyDown 이 처리).
+- **빈 상태**: 검색 활성 + 0 결과면 뷰별 메시지 대신 "검색 결과가 없습니다" + 검색어 mono 라벨. today 뷰에서도 hour grid 대신 EmptyState 분기.
+- **활성 표식**: 노출된 input 자체가 표식이라 subtitle 에 중복 prefix 는 두지 않는다 (TopBar subtitle 은 항상 `{context} · N tasks`). project / tag 필터의 인라인 chips 와 같은 layer 에서 컨텍스트를 노출.
 
 ## Not in scope (don't add unprompted)
 
 - Variants A and C — deferred.
 - A test framework.
-- 태그 CRUD UI (현재 DB에서 조회만, 추가/삭제 UI 없음)
-- 프로젝트 CRUD UI (현재 DB에서 조회만)
-- 서브태스크 CRUD (subtotal/subdone 은 표시만)
-- 검색/필터 기능 (UI만)
+- 태그 rename / hue 변경 UI (현재 삭제 + 재생성으로 갈음)
+- multi-tag 필터 (현재 단일 선택)
+- 검색의 cross-view discovery 힌트 (현재 뷰 빈 결과시 "다른 뷰에서 N개 발견" 링크)
+- 검색어 매칭 부분 강조 (1차에선 단순 필터만)
 
 If a task seems to require any of these, confirm with the user before adding the dependency.
 

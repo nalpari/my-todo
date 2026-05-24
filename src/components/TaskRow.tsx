@@ -2,11 +2,36 @@
 
 import type { CSSProperties } from "react";
 import { useState } from "react";
-import { Checkbox, MonoLabel, ProjectDot, TagChip } from "./Primitives";
+import { Checkbox, MonoLabel, ProjectDot } from "./Primitives";
+import { TaskTagsEditor } from "./TaskTagsEditor";
+import { SubtaskList } from "./SubtaskList";
 import { useApp } from "@/lib/AppContext";
 import { type Task } from "@/lib/data";
 
 export type ItemStyle = "editorial" | "card" | "minimal";
+
+/**
+ * task 가 subtask 없으면 호버 시 표시할 "+ 서브태스크" affordance.
+ * 클릭하면 expand + SubtaskList 자체 input 으로 진입 (자동 포커스는 SubtaskList 가 처리할 수 없어서
+ * MVP 는 expand 만 — 사용자가 input 에 한 번 더 클릭).
+ */
+const AddSubtaskAffordance = ({ onClick }: { onClick: () => void }) => (
+  <button
+    type="button"
+    onClick={onClick}
+    style={{
+      fontFamily: "var(--font-mono)", fontSize: 10,
+      color: "var(--text-faint)", letterSpacing: 0.3,
+      background: "transparent",
+      border: "1px dashed var(--border)",
+      borderRadius: 3,
+      padding: "1px 6px",
+      cursor: "pointer",
+    }}
+  >
+    + 서브태스크
+  </button>
+);
 
 export const TaskRow = ({
   task,
@@ -22,11 +47,26 @@ export const TaskRow = ({
   showTime?: boolean;
 }) => {
   const { toggleTask, deleteTask, updateTaskTitle, projects } = useApp();
-  const project = task.project ? projects.find((p) => p.id === task.project) : null;
+  const project = task.projectId ? projects.find((p) => p.id === task.projectId) : null;
   const hasSub = task.subtotal > 0;
   const [isEditing, setIsEditing] = useState(false);
   const [editValue, setEditValue] = useState(task.title);
   const [hovered, setHovered] = useState(false);
+  const [expanded, setExpanded] = useState(false);
+
+  // 외부에서 task.title 이 바뀌면 (낙관 reducer / revalidate / 다른 surface 의 변경)
+  // editValue 도 동기화. render-during-render 패턴 — useEffect + setState 의 cascade
+  // 경고를 피하면서 React 19 가 같은 render pass 안에서 새 값을 흡수한다.
+  // 편집 중이면 사용자의 입력을 덮어쓰지 않게 prev 만 추적.
+  const [lastSeenTitle, setLastSeenTitle] = useState(task.title);
+  if (task.title !== lastSeenTitle) {
+    setLastSeenTitle(task.title);
+    if (!isEditing) setEditValue(task.title);
+  }
+
+  // 0 subtasks 일 때도 expand 가능 — affordance 클릭 시 펼침 + SubtaskList 입력 노출.
+  // SubtaskMeter 와 affordance 가 같은 토글 함수 공유.
+  const toggleExpand = () => setExpanded((v) => !v);
 
   const handleTitleBlur = () => {
     setIsEditing(false);
@@ -80,7 +120,7 @@ export const TaskRow = ({
                   textTransform: "uppercase",
                 }}
               >
-                <ProjectDot id={task.project} size={6} />
+                <ProjectDot id={task.projectId} size={6} />
                 {project.name}
               </span>
             )}
@@ -117,9 +157,19 @@ export const TaskRow = ({
                 {task.due_time}
               </span>
             )}
-            {task.tags.map((t) => <TagChip key={t} id={t} small />)}
-            {hasSub && <SubtaskMeter total={task.subtotal} done={task.subdone} />}
+            <TaskTagsEditor taskId={task.id} tags={task.tags} active={hovered} />
+            {hasSub ? (
+              <SubtaskMeter
+                total={task.subtotal}
+                done={task.subdone}
+                expanded={expanded}
+                onClick={toggleExpand}
+              />
+            ) : (
+              hovered && <AddSubtaskAffordance onClick={() => setExpanded(true)} />
+            )}
           </div>
+          {expanded && <SubtaskList taskId={task.id} />}
         </div>
         {hovered && (
           <button
@@ -154,7 +204,7 @@ export const TaskRow = ({
         >
           {task.title}
         </span>
-        {showProject && project && <ProjectDot id={task.project} size={6} />}
+        {showProject && project && <ProjectDot id={task.projectId} size={6} />}
         {showTime && task.due_time && (
           <span style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--text-faint)", letterSpacing: 0.3 }}>
             {task.due_time}
@@ -225,18 +275,30 @@ export const TaskRow = ({
             {task.title}
           </div>
         )}
-        {((showProject && project) || task.tags.length > 0 || hasSub) && (
+        {/* 메타데이터 줄: 호버 중이면 항상 표시 (TaskTagsEditor 의 "+" 가 항상 자리 확보).
+            아니면 표시할 내용이 하나라도 있을 때만. */}
+        {(hovered || (showProject && project) || task.tags.length > 0 || hasSub) && (
           <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", marginTop: 6 }}>
             {showProject && project && (
               <span style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 11.5, color: "var(--text-muted)" }}>
-                <ProjectDot id={task.project} size={6} />
+                <ProjectDot id={task.projectId} size={6} />
                 {project.name}
               </span>
             )}
-            {task.tags.map((t) => <TagChip key={t} id={t} small />)}
-            {hasSub && <SubtaskMeter total={task.subtotal} done={task.subdone} />}
+            <TaskTagsEditor taskId={task.id} tags={task.tags} active={hovered} />
+            {hasSub ? (
+              <SubtaskMeter
+                total={task.subtotal}
+                done={task.subdone}
+                expanded={expanded}
+                onClick={toggleExpand}
+              />
+            ) : (
+              hovered && <AddSubtaskAffordance onClick={() => setExpanded(true)} />
+            )}
           </div>
         )}
+        {expanded && <SubtaskList taskId={task.id} />}
       </div>
 
       <span
@@ -265,24 +327,78 @@ const deleteBtn: CSSProperties = {
   cursor: "pointer", padding: 0,
 };
 
-export const SubtaskMeter = ({ total, done }: { total: number; done: number }) => (
-  <span
-    style={{
-      display: "inline-flex", alignItems: "center", gap: 6,
-      fontFamily: "var(--font-mono)", fontSize: 10,
-      color: "var(--text-muted)", letterSpacing: 0.3,
-    }}
-  >
-    <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
-      <rect x="2" y="3" width="3" height="3" rx="0.5" stroke="currentColor" strokeWidth="1.3"
-        fill={done > 0 ? "currentColor" : "none"} opacity={done > 0 ? 0.7 : 1} />
-      <line x1="7" y1="4.5" x2="14" y2="4.5" stroke="currentColor" strokeWidth="1.3" />
-      <rect x="2" y="10" width="3" height="3" rx="0.5" stroke="currentColor" strokeWidth="1.3" />
-      <line x1="7" y1="11.5" x2="14" y2="11.5" stroke="currentColor" strokeWidth="1.3" />
-    </svg>
-    {done}/{total}
-  </span>
-);
+/**
+ * onClick + expanded 가 전달되면 클릭 가능한 토글로 작동 (chevron 표시).
+ * 둘 다 없으면 read-only span (기존 동작 유지 — UpcomingItem 등에서 사용).
+ */
+export const SubtaskMeter = ({
+  total,
+  done,
+  expanded,
+  onClick,
+}: {
+  total: number;
+  done: number;
+  expanded?: boolean;
+  onClick?: () => void;
+}) => {
+  const content = (
+    <>
+      <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+        <rect x="2" y="3" width="3" height="3" rx="0.5" stroke="currentColor" strokeWidth="1.3"
+          fill={done > 0 ? "currentColor" : "none"} opacity={done > 0 ? 0.7 : 1} />
+        <line x1="7" y1="4.5" x2="14" y2="4.5" stroke="currentColor" strokeWidth="1.3" />
+        <rect x="2" y="10" width="3" height="3" rx="0.5" stroke="currentColor" strokeWidth="1.3" />
+        <line x1="7" y1="11.5" x2="14" y2="11.5" stroke="currentColor" strokeWidth="1.3" />
+      </svg>
+      {done}/{total}
+      {onClick && (
+        <span
+          aria-hidden="true"
+          style={{
+            display: "inline-block",
+            fontSize: 9,
+            transition: "transform .15s",
+            transform: expanded ? "rotate(90deg)" : "rotate(0deg)",
+            color: "var(--text-faint)",
+          }}
+        >
+          ▸
+        </span>
+      )}
+    </>
+  );
+
+  const sharedStyle: CSSProperties = {
+    display: "inline-flex", alignItems: "center", gap: 6,
+    fontFamily: "var(--font-mono)", fontSize: 10,
+    color: "var(--text-muted)", letterSpacing: 0.3,
+  };
+
+  if (!onClick) {
+    return <span style={sharedStyle}>{content}</span>;
+  }
+  return (
+    <button
+      type="button"
+      onClick={(e) => {
+        e.stopPropagation();
+        onClick();
+      }}
+      aria-expanded={expanded}
+      aria-label={expanded ? "서브태스크 접기" : "서브태스크 펼치기"}
+      style={{
+        ...sharedStyle,
+        background: "transparent",
+        border: "none",
+        padding: 0,
+        cursor: "pointer",
+      }}
+    >
+      {content}
+    </button>
+  );
+};
 
 /* ─── Mini calendar (right rail) ───────────────────────────── */
 export const MiniCalendar = ({ compact = false }: { compact?: boolean }) => {
@@ -299,7 +415,11 @@ export const MiniCalendar = ({ compact = false }: { compact?: boolean }) => {
   const daysInMonth = new Date(year, month + 1, 0).getDate();
   const daysInPrev = new Date(year, month, 0).getDate();
 
-  const cells = Array.from({ length: 35 }, (_, i) => {
+  // 필요한 행 수: offset (앞쪽 빈칸) + daysInMonth 를 7 로 나눠 올림.
+  // 토요일/일요일에 1일이 시작하는 달은 6주 (42셀) 가 필요해 35셀 고정 시 마지막 줄이 잘렸음.
+  const rows = Math.ceil((offset + daysInMonth) / 7);
+  const cellCount = rows * 7;
+  const cells = Array.from({ length: cellCount }, (_, i) => {
     const dayNum = i - offset + 1;
     if (dayNum <= 0) return { n: daysInPrev + dayNum, dim: true, date: null };
     if (dayNum > daysInMonth) return { n: dayNum - daysInMonth, dim: true, date: null };

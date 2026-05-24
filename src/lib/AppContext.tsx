@@ -2,23 +2,46 @@
 
 import { createContext, useContext, useOptimistic, useState, startTransition, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
-import { type Project, type Tag, type Task } from "@/lib/data";
+import { type Project, type Subtask, type Tag, type Task } from "@/lib/data";
 import { type AppData } from "@/lib/queries";
 import { toggleTask as toggleTaskAction, deleteTask as deleteTaskAction, updateTask as updateTaskAction } from "@/app/tasks/actions";
+import { createProject as createProjectAction, updateProject as updateProjectAction, deleteProject as deleteProjectAction } from "@/app/projects/actions";
+import { createTag as createTagAction, deleteTag as deleteTagAction, assignTag as assignTagAction, unassignTag as unassignTagAction } from "@/app/tags/actions";
+import { createSubtask as createSubtaskAction, updateSubtask as updateSubtaskAction, deleteSubtask as deleteSubtaskAction } from "@/app/subtasks/actions";
+import { DEFAULT_PROJECT_COLOR } from "@/lib/palette";
 
 /* ─── 컨텍스트 타입 ─────────────────────────────────────────── */
 
 /** 토스트가 같은 메시지를 연속 표시할 때도 타이머가 재시작되도록 ts 동반 */
 export type AppError = { msg: string; ts: number };
 
+type TagHue = "accent" | "muted";
+
 type AppContextValue = {
   projects: Project[];
   tags: Tag[];
   tasks: Task[];
+  subtasks: Subtask[];
   /** currentDone: 서버에 보낼 새 done 값 계산용 (낙관 reducer 는 자체 toggle) */
   toggleTask: (id: string, currentDone: boolean) => void;
   deleteTask: (id: string) => void;
   updateTaskTitle: (id: string, title: string) => void;
+  /** 새 프로젝트 — id 는 클라이언트가 crypto.randomUUID() 로 미리 발급. */
+  createProject: (id: string, name: string, color?: string) => void;
+  updateProject: (id: string, fields: { name?: string; color?: string }) => void;
+  /** 삭제 → tasks 의 projectId 도 낙관적으로 null 로 cascade. */
+  deleteProject: (id: string) => void;
+  /** 새 태그 — id 는 클라이언트가 crypto.randomUUID() 로 미리 발급. */
+  createTag: (id: string, name: string, hue: TagHue) => void;
+  /** 삭제 → tasks.tags 에서 해당 tag 도 모두 제거 cascade (DB 의 task_tags ON DELETE CASCADE 미러). */
+  deleteTag: (id: string) => void;
+  assignTag: (taskId: string, tag: Tag) => void;
+  unassignTag: (taskId: string, tagId: string) => void;
+  /** 새 서브태스크 — id 는 클라이언트가 crypto.randomUUID() 로 미리 발급. */
+  createSubtask: (id: string, taskId: string, title: string) => void;
+  toggleSubtask: (id: string, taskId: string, currentDone: boolean) => void;
+  updateSubtaskTitle: (id: string, title: string) => void;
+  deleteSubtask: (id: string, taskId: string, wasDone: boolean) => void;
   /** 가장 최근 액션 실패. null 이면 토스트 숨김 */
   error: AppError | null;
   /** 외부에서도 에러 띄울 수 있게 노출 (예: InputBar) */
@@ -28,26 +51,149 @@ type AppContextValue = {
 
 const AppContext = createContext<AppContextValue | null>(null);
 
+/* ─── 낙관 reducer 의 통합 state 와 액션 타입 ──────────────── */
+
+type OptimisticState = { projects: Project[]; tags: Tag[]; tasks: Task[]; subtasks: Subtask[] };
+
+type OptimisticAction =
+  | { type: "task.toggle"; id: string }
+  | { type: "task.delete"; id: string }
+  | { type: "task.updateTitle"; id: string; title: string }
+  | { type: "project.create"; project: Project }
+  | { type: "project.update"; id: string; name?: string; color?: string }
+  | { type: "project.delete"; id: string }
+  | { type: "tag.create"; tag: Tag }
+  | { type: "tag.delete"; id: string }
+  | { type: "tag.assign"; taskId: string; tag: Tag }
+  | { type: "tag.unassign"; taskId: string; tagId: string }
+  | { type: "subtask.create"; subtask: Subtask }
+  | { type: "subtask.toggle"; id: string; taskId: string }
+  | { type: "subtask.updateTitle"; id: string; title: string }
+  | { type: "subtask.delete"; id: string; taskId: string; wasDone: boolean };
+
+function reducer(state: OptimisticState, action: OptimisticAction): OptimisticState {
+  switch (action.type) {
+    case "task.toggle":
+      return {
+        ...state,
+        tasks: state.tasks.map((t) => (t.id === action.id ? { ...t, done: !t.done } : t)),
+      };
+    case "task.delete":
+      // DB 의 ON DELETE CASCADE 미러 — 해당 task 의 subtasks 도 함께 제거.
+      return {
+        ...state,
+        tasks: state.tasks.filter((t) => t.id !== action.id),
+        subtasks: state.subtasks.filter((s) => s.task_id !== action.id),
+      };
+    case "task.updateTitle":
+      return {
+        ...state,
+        tasks: state.tasks.map((t) => (t.id === action.id ? { ...t, title: action.title } : t)),
+      };
+    case "project.create":
+      return { ...state, projects: [...state.projects, action.project] };
+    case "project.update":
+      return {
+        ...state,
+        projects: state.projects.map((p) =>
+          p.id === action.id
+            ? { ...p, ...(action.name !== undefined ? { name: action.name } : {}), ...(action.color !== undefined ? { color: action.color } : {}) }
+            : p,
+        ),
+      };
+    case "project.delete":
+      // cascade: 이 프로젝트에 속한 task 들의 projectId 필드도 null 로.
+      // DB 의 ON DELETE SET NULL 과 동일한 결과를 클라이언트에 미리 반영해
+      // revalidate 전 0.1-0.3s 동안 lookup miss 가 깜박이지 않게 한다.
+      return {
+        ...state,
+        projects: state.projects.filter((p) => p.id !== action.id),
+        tasks: state.tasks.map((t) => (t.projectId === action.id ? { ...t, projectId: null } : t)),
+      };
+    case "tag.create":
+      return { ...state, tags: [...state.tags, action.tag] };
+    case "tag.delete":
+      // cascade: DB 의 task_tags ON DELETE CASCADE 와 동일 — 소속 task 의 tags 배열에서 제거.
+      return {
+        ...state,
+        tags: state.tags.filter((g) => g.id !== action.id),
+        tasks: state.tasks.map((t) =>
+          t.tags.some((tg) => tg.id === action.id)
+            ? { ...t, tags: t.tags.filter((tg) => tg.id !== action.id) }
+            : t,
+        ),
+      };
+    case "tag.assign":
+      return {
+        ...state,
+        tasks: state.tasks.map((t) =>
+          t.id === action.taskId && !t.tags.some((tg) => tg.id === action.tag.id)
+            ? { ...t, tags: [...t.tags, action.tag] }
+            : t,
+        ),
+      };
+    case "tag.unassign":
+      return {
+        ...state,
+        tasks: state.tasks.map((t) =>
+          t.id === action.taskId ? { ...t, tags: t.tags.filter((tg) => tg.id !== action.tagId) } : t,
+        ),
+      };
+    case "subtask.create":
+      // tasks.subtotal 도 함께 증가 — DB 트리거의 결과 미러.
+      return {
+        ...state,
+        subtasks: [...state.subtasks, action.subtask],
+        tasks: state.tasks.map((t) =>
+          t.id === action.subtask.task_id ? { ...t, subtotal: t.subtotal + 1 } : t,
+        ),
+      };
+    case "subtask.toggle": {
+      const target = state.subtasks.find((s) => s.id === action.id);
+      if (!target) return state;
+      const delta = target.done ? -1 : +1;
+      return {
+        ...state,
+        subtasks: state.subtasks.map((s) =>
+          s.id === action.id ? { ...s, done: !s.done } : s,
+        ),
+        tasks: state.tasks.map((t) =>
+          t.id === action.taskId ? { ...t, subdone: t.subdone + delta } : t,
+        ),
+      };
+    }
+    case "subtask.updateTitle":
+      return {
+        ...state,
+        subtasks: state.subtasks.map((s) =>
+          s.id === action.id ? { ...s, title: action.title } : s,
+        ),
+      };
+    case "subtask.delete":
+      // subtotal 은 항상 -1. subdone 은 wasDone 일 때만 -1.
+      return {
+        ...state,
+        subtasks: state.subtasks.filter((s) => s.id !== action.id),
+        tasks: state.tasks.map((t) =>
+          t.id === action.taskId
+            ? { ...t, subtotal: t.subtotal - 1, subdone: action.wasDone ? t.subdone - 1 : t.subdone }
+            : t,
+        ),
+      };
+    default:
+      return state;
+  }
+}
+
 /* ─── Provider ──────────────────────────────────────────────── */
 
 export function AppProvider({ appData, children }: { appData: AppData; children: ReactNode }) {
   const router = useRouter();
   const [error, setError] = useState<AppError | null>(null);
 
-  const [optimisticTasks, applyOptimistic] = useOptimistic(
-    appData.tasks,
-    (tasks: Task[], update: { type: "toggle"; id: string } | { type: "delete"; id: string } | { type: "updateTitle"; id: string; title: string }) => {
-      if (update.type === "toggle") {
-        return tasks.map((t) => (t.id === update.id ? { ...t, done: !t.done } : t));
-      }
-      if (update.type === "delete") {
-        return tasks.filter((t) => t.id !== update.id);
-      }
-      if (update.type === "updateTitle") {
-        return tasks.map((t) => (t.id === update.id ? { ...t, title: update.title } : t));
-      }
-      return tasks;
-    },
+  const [optimistic, applyOptimistic] = useOptimistic(
+    { projects: appData.projects, tags: appData.tags, tasks: appData.tasks, subtasks: appData.subtasks },
+    reducer,
   );
 
   // useOptimistic dispatch 는 transition/action 안에서만 호출해야 함 (React 19).
@@ -69,22 +215,107 @@ export function AppProvider({ appData, children }: { appData: AppData; children:
 
   const toggleTask = (id: string, currentDone: boolean) => {
     startTransition(() => {
-      applyOptimistic({ type: "toggle", id });
+      applyOptimistic({ type: "task.toggle", id });
       void runAction(() => toggleTaskAction(id, !currentDone));
     });
   };
 
   const deleteTask = (id: string) => {
     startTransition(() => {
-      applyOptimistic({ type: "delete", id });
+      applyOptimistic({ type: "task.delete", id });
       void runAction(() => deleteTaskAction(id));
     });
   };
 
   const updateTaskTitle = (id: string, title: string) => {
     startTransition(() => {
-      applyOptimistic({ type: "updateTitle", id, title });
+      applyOptimistic({ type: "task.updateTitle", id, title });
       void runAction(() => updateTaskAction(id, { title }));
+    });
+  };
+
+  const createProject = (id: string, name: string, color?: string) => {
+    const finalColor = color ?? DEFAULT_PROJECT_COLOR;
+    startTransition(() => {
+      applyOptimistic({
+        type: "project.create",
+        project: { id, name, color: finalColor, count: 0 },
+      });
+      void runAction(() => createProjectAction(id, name, finalColor));
+    });
+  };
+
+  const updateProject = (id: string, fields: { name?: string; color?: string }) => {
+    startTransition(() => {
+      applyOptimistic({ type: "project.update", id, ...fields });
+      void runAction(() => updateProjectAction(id, fields));
+    });
+  };
+
+  const deleteProject = (id: string) => {
+    startTransition(() => {
+      applyOptimistic({ type: "project.delete", id });
+      void runAction(() => deleteProjectAction(id));
+    });
+  };
+
+  const createTag = (id: string, name: string, hue: TagHue) => {
+    startTransition(() => {
+      applyOptimistic({ type: "tag.create", tag: { id, name, hue } });
+      void runAction(() => createTagAction(id, name, hue));
+    });
+  };
+
+  const deleteTag = (id: string) => {
+    startTransition(() => {
+      applyOptimistic({ type: "tag.delete", id });
+      void runAction(() => deleteTagAction(id));
+    });
+  };
+
+  const assignTag = (taskId: string, tag: Tag) => {
+    startTransition(() => {
+      applyOptimistic({ type: "tag.assign", taskId, tag });
+      void runAction(() => assignTagAction(taskId, tag.id));
+    });
+  };
+
+  const unassignTag = (taskId: string, tagId: string) => {
+    startTransition(() => {
+      applyOptimistic({ type: "tag.unassign", taskId, tagId });
+      void runAction(() => unassignTagAction(taskId, tagId));
+    });
+  };
+
+  const createSubtask = (id: string, taskId: string, title: string) => {
+    const now = new Date().toISOString();
+    startTransition(() => {
+      applyOptimistic({
+        type: "subtask.create",
+        subtask: { id, task_id: taskId, title, done: false, sort_order: 0, created_at: now },
+      });
+      void runAction(() => createSubtaskAction(id, taskId, title));
+    });
+  };
+
+  const toggleSubtask = (id: string, taskId: string, currentDone: boolean) => {
+    startTransition(() => {
+      applyOptimistic({ type: "subtask.toggle", id, taskId });
+      void runAction(() => updateSubtaskAction(id, { done: !currentDone }));
+    });
+  };
+
+  const updateSubtaskTitle = (id: string, title: string) => {
+    startTransition(() => {
+      applyOptimistic({ type: "subtask.updateTitle", id, title });
+      void runAction(() => updateSubtaskAction(id, { title }));
+    });
+  };
+
+  const deleteSubtask = (id: string, taskId: string, wasDone: boolean) => {
+    startTransition(() => {
+      applyOptimistic({ type: "subtask.delete", id, taskId, wasDone });
+      void runAction(() => deleteSubtaskAction(id));
     });
   };
 
@@ -94,12 +325,24 @@ export function AppProvider({ appData, children }: { appData: AppData; children:
   return (
     <AppContext.Provider
       value={{
-        projects: appData.projects,
-        tags: appData.tags,
-        tasks: optimisticTasks,
+        projects: optimistic.projects,
+        tags: optimistic.tags,
+        tasks: optimistic.tasks,
+        subtasks: optimistic.subtasks,
         toggleTask,
         deleteTask,
         updateTaskTitle,
+        createProject,
+        updateProject,
+        deleteProject,
+        createTag,
+        deleteTag,
+        assignTag,
+        unassignTag,
+        createSubtask,
+        toggleSubtask,
+        updateSubtaskTitle,
+        deleteSubtask,
         error,
         reportError,
         dismissError,

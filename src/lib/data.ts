@@ -36,6 +36,17 @@ export type TaskRow = {
   updated_at: string;
 };
 
+export type SubtaskRow = {
+  id: string;
+  task_id: string;
+  user_id: string;
+  title: string;
+  done: boolean;
+  sort_order: number;
+  created_at: string;
+  updated_at: string;
+};
+
 /* ─── UI 표시용 타입 ─────────────────────────────────────────── */
 
 /** 사이드바·분포 차트용 프로젝트 (task count 포함) */
@@ -52,9 +63,24 @@ export type Tag = {
   hue: "accent" | "muted";
 };
 
+/** UI 표시용 서브태스크. task 와 분리된 별도 array 로 흐름 — taskId 로 룩업. */
+export type Subtask = {
+  id: string;
+  task_id: string;
+  title: string;
+  done: boolean;
+  sort_order: number;
+  created_at: string;
+};
+
 /**
  * 할 일 타임라인 버킷 키.
  * DB의 due_date(DATE)를 오늘 기준으로 분류할 때 사용한다.
+ *
+ * inbox: due_date 가 null — "언제 할지 정하지 않은" 일.
+ * later: due_date 가 today + 7일 보다 미래 — "한참 뒤" 일.
+ * 둘은 의미가 다르므로 분리 (이전 버전은 둘 다 "later" 로 묶여 사이드바
+ * 인박스/언젠가 카운트가 중복되는 버그가 있었음).
  */
 export type BucketKey =
   | "overdue"
@@ -65,14 +91,21 @@ export type BucketKey =
   | "day5"
   | "day6"
   | "day7"
-  | "later";
+  | "later"
+  | "inbox";
 
 /** UI 컴포넌트에 넘기는 Task (DB Row + 파생 필드) */
 export type Task = {
   id: string;           // DB uuid
   title: string;
-  project: string | null;   // project_id
-  tags: string[];            // tag id 배열
+  projectId: string | null; // DB 의 project_id 를 1:1 미러 — 이름만 카멜케이스로
+  /**
+   * task_tags 조인 결과를 인라인 Tag 객체로 들고 온다. TagChip 렌더 시 매번
+   * tags.find() 룩업을 안 해도 되므로 N*M 비용을 N 으로 줄이고 (rowToTask 단계
+   * 1회 룩업), 태그가 삭제·rename 될 때도 reducer 가 task.tags 안의 객체를
+   * 함께 갱신하면 UI 가 즉시 일관된다.
+   */
+  tags: Tag[];
   due_date: string | null;  // ISO date
   due_time: string | null;  // "HH:MM"
   done: boolean;
@@ -80,6 +113,9 @@ export type Task = {
   subdone: number;
   /** due_date → 오늘 기준 버킷. 클라이언트에서 계산 */
   bucket: BucketKey;
+  /** TaskList 의 인박스/완료 정렬에 사용 (ISO timestamp) */
+  created_at: string;
+  updated_at: string;
 };
 
 export type DayBucket = {
@@ -108,7 +144,7 @@ export function toISODate(d: Date): string {
 
 /** due_date(ISO)를 오늘 기준 BucketKey로 변환 */
 export function dateToBucket(dueDate: string | null, today: Date): BucketKey {
-  if (!dueDate) return "later";
+  if (!dueDate) return "inbox";
   const due = new Date(dueDate + "T00:00:00"); // 로컬 자정
   const todayMidnight = new Date(today.getFullYear(), today.getMonth(), today.getDate());
   const diff = Math.floor((due.getTime() - todayMidnight.getTime()) / 86400000);
@@ -173,18 +209,20 @@ export function buildDayBuckets(today: Date): DayBucket[] {
 
 /* ─── TaskRow → Task 변환 ──────────────────────────────────── */
 
-export function rowToTask(row: TaskRow, tagIds: string[], today: Date): Task {
+export function rowToTask(row: TaskRow, tags: Tag[], today: Date): Task {
   return {
     id: row.id,
     title: row.title,
-    project: row.project_id,
-    tags: tagIds,
+    projectId: row.project_id,
+    tags,
     due_date: row.due_date,
     due_time: row.due_time,
     done: row.done,
     subtotal: row.subtotal,
     subdone: row.subdone,
     bucket: dateToBucket(row.due_date, today),
+    created_at: row.created_at,
+    updated_at: row.updated_at,
   };
 }
 
@@ -198,3 +236,14 @@ export const tagById = (tags: Tag[], id: string) =>
 
 export const tasksByBucket = (tasks: Task[], key: BucketKey) =>
   tasks.filter((t) => t.bucket === key);
+
+export function rowToSubtask(row: SubtaskRow): Subtask {
+  return {
+    id: row.id,
+    task_id: row.task_id,
+    title: row.title,
+    done: row.done,
+    sort_order: row.sort_order,
+    created_at: row.created_at,
+  };
+}

@@ -3,27 +3,87 @@
 import type { CSSProperties } from "react";
 import { useFormStatus } from "react-dom";
 import { useRef, useState, useTransition } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { signOut } from "@/app/auth/actions";
 import { createTask } from "@/app/tasks/actions";
-import { KeyHint, MonoLabel, TagChip } from "./Primitives";
+import { KeyHint, MonoLabel } from "./Primitives";
+import { ProjectList } from "./ProjectList";
+import { TagList } from "./TagList";
 import { useApp } from "@/lib/AppContext";
 import { toISODate } from "@/lib/data";
+import { parseView, toggleViewHref, type ViewKey } from "@/lib/view";
+
+/**
+ * 뷰별 새 task 의 due_date 기본값.
+ *  - today    → 오늘
+ *  - upcoming → 내일
+ *  - inbox    → null (미할당)
+ *  - someday  → 오늘 + 8일 (예정 윈도우 너머의 첫 날)
+ *  - done     → 오늘 (의미 모호하지만 일관 fallback)
+ */
+function viewDefaultDueDate(view: ViewKey, today: Date): string | null {
+  switch (view) {
+    case "today":
+      return toISODate(today);
+    case "upcoming": {
+      const d = new Date(today);
+      d.setDate(today.getDate() + 1);
+      return toISODate(d);
+    }
+    case "inbox":
+      return null;
+    case "someday": {
+      const d = new Date(today);
+      d.setDate(today.getDate() + 8);
+      return toISODate(d);
+    }
+    case "done":
+      return toISODate(today);
+  }
+}
+
+/** InputBar 우측 칩에 노출할 짧은 라벨. due_date 기본값을 사람-친화 표기로. */
+function viewDefaultDueLabel(view: ViewKey): string {
+  switch (view) {
+    case "today":
+    case "done":
+      return "오늘";
+    case "upcoming":
+      return "내일";
+    case "inbox":
+      return "미할당";
+    case "someday":
+      return "나중에";
+  }
+}
 
 export type DisplayUser = { name: string; email: string; avatarUrl?: string };
 
-type SidebarProps = { active?: string; compact?: boolean; user: DisplayUser };
+type SidebarProps = { compact?: boolean; user: DisplayUser };
 
-export const AppSidebar = ({ active = "today", compact = false, user }: SidebarProps) => {
-  const { projects, tags, tasks } = useApp();
+/**
+ * nav 카운트는 항상 "프로젝트 필터를 무시한 전역 카운트" (Q3-d).
+ * inbox 분리 (Q3-a) 적용 후 정의 충돌 해소됨.
+ */
+export const AppSidebar = ({ compact = false, user }: SidebarProps) => {
+  const { tasks } = useApp();
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const activeView = parseView(searchParams.get("view"));
 
-  const navItems = [
-    { id: "today",    label: "오늘",   count: tasks.filter((t) => t.bucket === "today" && !t.done).length,    kbd: "⌘1" },
-    { id: "upcoming", label: "예정",   count: tasks.filter((t) => !["today", "overdue"].includes(t.bucket) && !t.done).length, kbd: "⌘2" },
-    { id: "inbox",    label: "인박스", count: tasks.filter((t) => !t.due_date && !t.done).length,              kbd: "⌘3" },
-    { id: "someday",  label: "언젠가", count: tasks.filter((t) => t.bucket === "later" && !t.done).length,     kbd: null },
-    { id: "done",     label: "완료",   count: tasks.filter((t) => t.done).length,                              kbd: null },
+  const navItems: { id: ViewKey; label: string; count: number; kbd: string | null }[] = [
+    { id: "today",    label: "오늘",   count: tasks.filter((t) => (t.bucket === "today" || t.bucket === "overdue") && !t.done).length, kbd: "⌘1" },
+    { id: "upcoming", label: "예정",   count: tasks.filter((t) => ["tomorrow","day3","day4","day5","day6","day7"].includes(t.bucket) && !t.done).length, kbd: "⌘2" },
+    { id: "inbox",    label: "인박스", count: tasks.filter((t) => t.bucket === "inbox" && !t.done).length, kbd: "⌘3" },
+    { id: "someday",  label: "언젠가", count: tasks.filter((t) => t.bucket === "later" && !t.done).length, kbd: null },
+    { id: "done",     label: "완료",   count: tasks.filter((t) => t.done).length, kbd: null },
   ];
+
+  const handleNavClick = (e: React.MouseEvent, viewId: ViewKey) => {
+    e.preventDefault();
+    // router.replace — 히스토리 폭증 방지 (Q3-c). 동일 뷰 재클릭은 toggleViewHref 가 default 로 처리.
+    router.replace(toggleViewHref(new URLSearchParams(searchParams.toString()), viewId), { scroll: false });
+  };
 
   return (
     <aside style={{ ...S.sidebar, width: compact ? 220 : 260 }}>
@@ -42,11 +102,12 @@ export const AppSidebar = ({ active = "today", compact = false, user }: SidebarP
       {/* primary nav */}
       <nav style={S.nav}>
         {navItems.map((n) => {
-          const isActive = n.id === active;
+          const isActive = n.id === activeView;
           return (
             <a
               key={n.id}
-              href="#"
+              href={toggleViewHref(new URLSearchParams(searchParams.toString()), n.id)}
+              onClick={(e) => handleNavClick(e, n.id)}
               style={{ ...S.navLink, ...(isActive ? S.navLinkActive : {}) }}
             >
               <span
@@ -67,41 +128,10 @@ export const AppSidebar = ({ active = "today", compact = false, user }: SidebarP
       </nav>
 
       {/* projects */}
-      <div style={S.section}>
-        <div style={S.sectionHead}>
-          <MonoLabel tracking={1.4} size={10}>Projects</MonoLabel>
-          <button style={S.addBtn} aria-label="add project" type="button">+</button>
-        </div>
-        <ul style={S.projList}>
-          {projects.map((p) => (
-            <li key={p.id} style={S.projRow}>
-              <span
-                style={{
-                  width: 8,
-                  height: 8,
-                  borderRadius: 2,
-                  background: p.color,
-                  flexShrink: 0,
-                }}
-              />
-              <span style={S.projName}>{p.name}</span>
-              <span style={S.projCount}>{p.count}</span>
-            </li>
-          ))}
-        </ul>
-      </div>
+      <ProjectList />
 
       {/* tags */}
-      <div style={S.section}>
-        <div style={S.sectionHead}>
-          <MonoLabel tracking={1.4} size={10}>Tags</MonoLabel>
-        </div>
-        <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-          {tags.map((t) => (
-            <TagChip key={t.id} id={t.id} small />
-          ))}
-        </div>
-      </div>
+      <TagList />
 
       {/* shortcut */}
       <div style={S.shortcutBox}>
@@ -118,51 +148,165 @@ export const AppSidebar = ({ active = "today", compact = false, user }: SidebarP
   );
 };
 
+/**
+ * searchQuery / onSearchChange / searchInputRef 는 controlled input 패턴.
+ * 부모 (VariantBSplitInner) 가 state 와 ⌘K/Esc 전역 단축키를 소유 — TopBar 는
+ * 순수 view. inputRef 를 prop 으로 받아 부모가 ref.focus() 호출 가능.
+ *
+ * 검색어가 있을 때만 우측 × clear 버튼 노출 (mousedown=preventDefault 로
+ * input focus 유지 — 클릭 직후에도 계속 타이핑 가능).
+ */
+/**
+ * 활성 필터를 인라인 chip 으로 노출 — 각 chip × 로 해당 차원만 해제.
+ * 검색 필터는 input 자체가 query 와 × 를 이미 보여주므로 chip 으로 중복하지 않음.
+ * subtitle 은 단순한 `{context} · N tasks` 로 유지 — 활성 필터의 식별은 chips 가 담당.
+ */
 export const AppTopBar = ({
-  title = "오늘",
+  title,
   subtitle,
   dense = false,
+  searchQuery,
+  onSearchChange,
+  searchInputRef,
+  activeProject,
+  activeTag,
+  onClearProject,
+  onClearTag,
 }: {
-  title?: string;
-  subtitle?: string;
+  title: string;
+  subtitle: string;
   dense?: boolean;
+  searchQuery: string;
+  onSearchChange: (value: string) => void;
+  searchInputRef: React.RefObject<HTMLInputElement | null>;
+  activeProject: { id: string; name: string; color: string } | null;
+  activeTag: { id: string; name: string; hue: "accent" | "muted" } | null;
+  onClearProject: () => void;
+  onClearTag: () => void;
 }) => {
-  // 실시간 날짜는 VariantBSplit에서 내려줌 — 없으면 오늘 날짜 폴백
-  const defaultSubtitle = subtitle ?? (() => {
-    const now = new Date();
-    return `${now.getMonth() + 1}월 ${now.getDate()}일, ${["일", "월", "화", "수", "목", "금", "토"][now.getDay()]}요일`;
-  })();
-
   return (
     <div style={{ ...S.topbar, padding: dense ? "14px 32px" : "20px 40px" }}>
       <div style={{ display: "flex", alignItems: "baseline", gap: 14, minWidth: 0 }}>
         <h1 style={S.topTitle}>{title}</h1>
-        <span style={S.topSub}>{defaultSubtitle}</span>
+        <span style={S.topSub}>{subtitle}</span>
       </div>
-      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-        <div style={S.search}>
-          <svg width="13" height="13" viewBox="0 0 16 16" fill="none" style={{ opacity: 0.5 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 10, flexShrink: 0 }}>
+        {activeProject && (
+          <FilterChip
+            label={activeProject.name}
+            colorDot={activeProject.color}
+            ariaLabel={`프로젝트 ${activeProject.name} 필터 해제`}
+            onClear={onClearProject}
+          />
+        )}
+        {activeTag && (
+          <FilterChip
+            label={`#${activeTag.name}`}
+            hue={activeTag.hue}
+            ariaLabel={`#${activeTag.name} 태그 필터 해제`}
+            onClear={onClearTag}
+          />
+        )}
+        <label style={S.search}>
+          <svg width="13" height="13" viewBox="0 0 16 16" fill="none" style={{ opacity: 0.5, flexShrink: 0 }} aria-hidden="true">
             <circle cx="7" cy="7" r="4.5" stroke="currentColor" strokeWidth="1.4" />
             <path d="M10.5 10.5l3 3" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
           </svg>
-          <span style={{ color: "var(--text-faint)", fontSize: 13 }}>할 일, 프로젝트 검색</span>
-          <span style={{ marginLeft: "auto", display: "flex", gap: 4 }}>
-            <KeyHint>⌘</KeyHint>
-            <KeyHint>K</KeyHint>
-          </span>
-        </div>
-        <button style={S.filterBtn} type="button">
-          <span>필터</span>
-          <span style={{ color: "var(--accent)" }}>· 2</span>
-        </button>
+          <input
+            ref={searchInputRef}
+            type="search"
+            value={searchQuery}
+            onChange={(e) => onSearchChange(e.target.value)}
+            onKeyDown={(e) => {
+              // Esc: 검색어 비우고 blur. 입력에 포커스가 있을 때만 동작 — ⌘K 는
+              // 부모의 전역 리스너가 처리해서 어디서든 input 으로 점프.
+              if (e.key === "Escape") {
+                onSearchChange("");
+                (e.target as HTMLInputElement).blur();
+              }
+            }}
+            placeholder="할 일, 프로젝트 검색"
+            aria-label="검색"
+            autoComplete="off"
+            style={S.searchInput}
+          />
+          {searchQuery ? (
+            <button
+              type="button"
+              aria-label="검색어 지우기"
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => onSearchChange("")}
+              style={S.searchClear}
+            >
+              ×
+            </button>
+          ) : (
+            <span style={{ marginLeft: "auto", display: "flex", gap: 4, flexShrink: 0 }}>
+              <KeyHint>⌘</KeyHint>
+              <KeyHint>K</KeyHint>
+            </span>
+          )}
+        </label>
       </div>
     </div>
   );
 };
 
+/* ─── FilterChip (TopBar 활성 필터 표시) ─────────────────── */
+
+/**
+ * project 면 colorDot, tag 면 hue 에 따른 accent/muted 스타일.
+ * 둘 다 안 주면 중성 회색 (확장 대비).
+ */
+const FilterChip = ({
+  label,
+  colorDot,
+  hue,
+  ariaLabel,
+  onClear,
+}: {
+  label: string;
+  colorDot?: string;
+  hue?: "accent" | "muted";
+  ariaLabel: string;
+  onClear: () => void;
+}) => {
+  const isAccent = hue === "accent";
+  const palette: CSSProperties = isAccent
+    ? { border: "1px solid var(--border-accent)", background: "var(--accent-dim)", color: "var(--accent-bright)" }
+    : { border: "1px solid var(--border)", background: "rgba(255,255,255,0.04)", color: "var(--text-secondary)" };
+
+  return (
+    <span style={{ ...S.filterChip, ...palette }}>
+      {colorDot && (
+        <span aria-hidden="true" style={{ width: 6, height: 6, borderRadius: 2, background: colorDot, flexShrink: 0 }} />
+      )}
+      <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 140 }}>
+        {label}
+      </span>
+      <button
+        type="button"
+        aria-label={ariaLabel}
+        onClick={onClear}
+        style={S.filterChipClear}
+      >
+        ×
+      </button>
+    </span>
+  );
+};
+
 /* ─── InputBar (활성화) ─────────────────────────────────────── */
 
-export const InputBar = ({ floating = false }: { floating?: boolean }) => {
+export const InputBar = ({
+  floating = false,
+  view = "today",
+  defaultProjectId = null,
+}: {
+  floating?: boolean;
+  view?: ViewKey;
+  defaultProjectId?: string | null;
+}) => {
   const formRef = useRef<HTMLFormElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const [value, setValue] = useState("");
@@ -175,9 +319,14 @@ export const InputBar = ({ floating = false }: { floating?: boolean }) => {
     const trimmed = value.trim();
     if (!trimmed) return;
 
+    // 뷰·필터 컨텍스트에서 새 task 가 어디에 속할지 자연스럽게 추론.
+    // 사용자가 "예정" 보는 중에 추가 → 내일, "프로젝트 X" 필터 중 추가 → X 에 속함.
+    const dueDate = viewDefaultDueDate(view, new Date());
+
     const fd = new FormData();
     fd.set("title", trimmed);
-    fd.set("due_date", toISODate(new Date())); // 기본: 오늘
+    if (dueDate) fd.set("due_date", dueDate);
+    if (defaultProjectId) fd.set("project_id", defaultProjectId);
 
     // 낙관적으로 input 을 비우되, 실패 시 복원해서 사용자 입력 손실을 막는다.
     setValue("");
@@ -212,7 +361,7 @@ export const InputBar = ({ floating = false }: { floating?: boolean }) => {
         autoComplete="off"
       />
       <div style={S.inputChips}>
-        <span style={S.chipAccent}>오늘</span>
+        <span style={S.chipAccent}>{viewDefaultDueLabel(view)}</span>
       </div>
       <span style={{ display: "flex", gap: 4 }}>
         <KeyHint>↵</KeyHint>
@@ -269,19 +418,6 @@ const S: Record<string, CSSProperties> = {
   navCount: { fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--text-faint)", letterSpacing: 0.3 },
   section: { display: "flex", flexDirection: "column", gap: 10 },
   sectionHead: { display: "flex", alignItems: "center", justifyContent: "space-between", padding: "0 4px" },
-  addBtn: {
-    width: 18, height: 18, borderRadius: 4,
-    background: "transparent", border: "1px solid var(--border)",
-    color: "var(--text-muted)", fontSize: 12, lineHeight: 1, cursor: "pointer",
-  },
-  projList: { listStyle: "none", margin: 0, padding: 0, display: "flex", flexDirection: "column", gap: 2 },
-  projRow: {
-    display: "flex", alignItems: "center", gap: 10,
-    padding: "6px 10px", borderRadius: "var(--radius-sm)",
-    fontSize: 13, color: "var(--text-secondary)", cursor: "pointer",
-  },
-  projName: { flex: 1, letterSpacing: -0.1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" },
-  projCount: { fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--text-faint)" },
   shortcutBox: {
     marginTop: "auto",
     padding: "10px 12px", borderRadius: "var(--radius)",
@@ -312,13 +448,43 @@ const S: Record<string, CSSProperties> = {
     border: "1px solid var(--border)",
     background: "rgba(255,255,255,0.03)",
     color: "var(--text-muted)",
+    cursor: "text",
   },
-  filterBtn: {
-    display: "flex", alignItems: "center", gap: 6,
-    padding: "8px 12px", borderRadius: "var(--radius)",
-    border: "1px solid var(--border)",
-    background: "transparent", color: "var(--text-secondary)",
-    fontSize: 13, cursor: "pointer",
+  searchInput: {
+    flex: 1, minWidth: 0,
+    background: "transparent", border: "none", outline: "none",
+    color: "var(--text-display)",
+    fontFamily: "var(--font-body)", fontSize: 13,
+    letterSpacing: -0.1,
+    padding: 0,
+    // 일부 브라우저의 type=search 기본 X 버튼 제거 (자체 × 사용)
+    WebkitAppearance: "none",
+  },
+  searchClear: {
+    width: 18, height: 18, borderRadius: 3,
+    background: "transparent", border: "none",
+    color: "var(--text-muted)", cursor: "pointer",
+    fontSize: 14, lineHeight: 1, padding: 0,
+    display: "flex", alignItems: "center", justifyContent: "center",
+    flexShrink: 0,
+  },
+  filterChip: {
+    display: "inline-flex", alignItems: "center", gap: 6,
+    padding: "5px 4px 5px 10px",
+    borderRadius: "var(--radius-full)",
+    fontFamily: "var(--font-mono)", fontSize: 11,
+    letterSpacing: 0.3,
+    flexShrink: 0,
+  },
+  filterChipClear: {
+    width: 16, height: 16, borderRadius: "50%",
+    background: "transparent",
+    border: "none",
+    color: "inherit", cursor: "pointer",
+    fontSize: 13, lineHeight: 1, padding: 0,
+    display: "flex", alignItems: "center", justifyContent: "center",
+    opacity: 0.7,
+    flexShrink: 0,
   },
 
   inputBar: {
