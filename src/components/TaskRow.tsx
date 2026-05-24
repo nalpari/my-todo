@@ -2,7 +2,8 @@
 
 import type { CSSProperties } from "react";
 import { useState } from "react";
-import { Checkbox, MonoLabel, ProjectDot, TagChip } from "./Primitives";
+import { Checkbox, MonoLabel, ProjectDot } from "./Primitives";
+import { TaskTagsEditor } from "./TaskTagsEditor";
 import { useApp } from "@/lib/AppContext";
 import { type Task } from "@/lib/data";
 
@@ -117,7 +118,7 @@ export const TaskRow = ({
                 {task.due_time}
               </span>
             )}
-            {task.tags.map((t) => <TagChip key={t} id={t} small />)}
+            <TaskTagsEditor taskId={task.id} tagIds={task.tags} active={hovered} />
             {hasSub && <SubtaskMeter total={task.subtotal} done={task.subdone} />}
           </div>
         </div>
@@ -225,7 +226,9 @@ export const TaskRow = ({
             {task.title}
           </div>
         )}
-        {((showProject && project) || task.tags.length > 0 || hasSub) && (
+        {/* 메타데이터 줄: 호버 중이면 항상 표시 (TaskTagsEditor 의 "+" 가 항상 자리 확보).
+            아니면 표시할 내용이 하나라도 있을 때만. */}
+        {(hovered || (showProject && project) || task.tags.length > 0 || hasSub) && (
           <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", marginTop: 6 }}>
             {showProject && project && (
               <span style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 11.5, color: "var(--text-muted)" }}>
@@ -233,7 +236,7 @@ export const TaskRow = ({
                 {project.name}
               </span>
             )}
-            {task.tags.map((t) => <TagChip key={t} id={t} small />)}
+            <TaskTagsEditor taskId={task.id} tagIds={task.tags} active={hovered} />
             {hasSub && <SubtaskMeter total={task.subtotal} done={task.subdone} />}
           </div>
         )}
