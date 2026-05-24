@@ -452,6 +452,13 @@ const TimelineCard = ({ task }: { task: Task }) => {
   const [editValue, setEditValue] = useState(task.title);
   const [expanded, setExpanded] = useState(false);
 
+  // TaskRow 와 동일 패턴 — render-during-render 로 외부 title 변경분을 흡수.
+  const [lastSeenTitle, setLastSeenTitle] = useState(task.title);
+  if (task.title !== lastSeenTitle) {
+    setLastSeenTitle(task.title);
+    if (!isEditing) setEditValue(task.title);
+  }
+
   const handleBlur = () => {
     setIsEditing(false);
     if (editValue.trim() && editValue !== task.title) {
