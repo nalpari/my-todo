@@ -97,7 +97,7 @@ Google OAuth 활성화 + 할 일 CRUD 구현 완료.
 
 ## DB 스키마 (CRUD 구현)
 
-DB 마이그레이션 SQL: `supabase/migrations/` (현재 `001_initial_schema.sql`, `002_rls_with_check.sql`, `003_tenant_isolation.sql`). 원격 적용은 Supabase MCP `apply_migration` 또는 Dashboard SQL Editor 사용. 002 는 001 의 UPDATE 정책에 `WITH CHECK` 를 추가해 소유권 이전 (`user_id` 변경) 공격을 막고, 003 은 외래키 차원의 cross-tenant 참조를 차단한다 (`tasks(project_id, user_id) → projects(id, user_id)` 복합 FK, `task_tags` 에 `user_id` 추가 후 task·tag 양쪽에 복합 FK, `due_time` HH:MM CHECK 제약).
+DB 마이그레이션 SQL: `supabase/migrations/` (현재 `001_initial_schema.sql`, `002_rls_with_check.sql`, `003_tenant_isolation.sql`, `004_projects_uniqueness.sql`). 원격 적용은 Supabase MCP `apply_migration` 또는 Dashboard SQL Editor 사용. 002 는 001 의 UPDATE 정책에 `WITH CHECK` 를 추가해 소유권 이전 (`user_id` 변경) 공격을 막고, 003 은 외래키 차원의 cross-tenant 참조를 차단한다 (`tasks(project_id, user_id) → projects(id, user_id)` 복합 FK, `task_tags` 에 `user_id` 추가 후 task·tag 양쪽에 복합 FK, `due_time` HH:MM CHECK 제약). 004 는 `projects(user_id, name) UNIQUE` 제약으로 같은 사용자 내 동명 프로젝트를 차단 — 위반 시 PostgreSQL `23505` → 서버 액션에서 "이미 사용 중인 이름입니다" 로 변환.
 
 ### 테이블 구조
 
@@ -116,8 +116,11 @@ DB 마이그레이션 SQL: `supabase/migrations/` (현재 `001_initial_schema.sq
 |------|------|
 | `src/lib/data.ts` | 타입 정의 (ProjectRow, TaskRow, Project, Tag, Task, BucketKey), 날짜 유틸 (toISODate, dateToBucket, buildWeek, buildDayBuckets, rowToTask) |
 | `src/lib/queries.ts` | RSC 서버에서 DB fetch (getProjects, getTags, getTasks, getAppData) |
-| `src/lib/AppContext.tsx` | Client 컨텍스트. `useOptimistic` 기반 낙관적 UI (toggleTask, deleteTask, updateTaskTitle). `AppProvider` + `useApp()` 훅 |
+| `src/lib/palette.ts` | 프로젝트 색 팔레트 (`PROJECT_COLORS` 8색, `DEFAULT_PROJECT_COLOR`, `isProjectColor` 런타임 가드) — Server Action 검증과 사이드바 swatch picker 가 공유 |
+| `src/lib/AppContext.tsx` | Client 컨텍스트. `useOptimistic` reducer 가 task 와 project 변이를 함께 관리 (task.toggle/delete/updateTitle + project.create/update/delete). `project.delete` 는 소속 task 의 `project` 필드를 null 로 cascade 해 DB 의 ON DELETE SET NULL 과 일치 |
 | `src/app/tasks/actions.ts` | Server Actions (createTask, toggleTask, updateTask, deleteTask) + `revalidatePath("/")` |
+| `src/app/projects/actions.ts` | Server Actions (createProject, updateProject, deleteProject). 동일 컨벤션 + `parseName` (trim·연속공백→1개·1-50자) + `parseColor` (`isProjectColor` enum 가드) + 23505 캐치 |
+| `src/components/ProjectList.tsx` | 사이드바 프로젝트 섹션 UI. ProjectRow 는 이름 인라인 편집 (blur=save, Esc=cancel) + 색 swatch popover + 호버 × 2단계 삭제 (`정말? · N개 해제`). NewProjectRow 는 `+` 버튼으로 펼침, 색 dot/swatch 클릭 시 input focus 유지 위해 mousedown 에서 `preventDefault` |
 
 ### CRUD 흐름
 
@@ -129,7 +132,7 @@ DB 마이그레이션 SQL: `supabase/migrations/` (현재 `001_initial_schema.sq
 
 ### 에러 처리 컨벤션 (tasks Server Action)
 
-- 모든 task Server Action 은 실패 시 **throw** 한다 (silent return 금지). DB 에러는 `throw new Error(...)`, 세션 만료는 `redirect("/login?error=session_expired")` (NEXT_REDIRECT 라 try/catch 로 감싸면 안 됨 — `requireUser()` 헬퍼에 일임).
+- 모든 task / project Server Action 은 실패 시 **throw** 한다 (silent return 금지). DB 에러는 `throw new Error(...)`, 세션 만료는 `redirect("/login?error=session_expired")` (NEXT_REDIRECT 라 try/catch 로 감싸면 안 됨 — `requireUser()` 헬퍼에 일임).
 - 클라이언트는 `AppContext` 의 `runAction` 헬퍼가 try/catch 로 잡아 (1) 에러 메시지를 `error` 상태에 기록, (2) `router.refresh()` 로 서버 상태를 다시 받아 낙관 잔존을 정정한다.
 - `VariantBSplit` 의 `<ErrorToast />` 는 `useApp().error` 를 구독해 하단 토스트로 표시 (4초 자동 닫힘 + 수동 ×). `InputBar` 도 createTask 실패 시 `reportError` + 입력값 복구.
 
@@ -143,7 +146,7 @@ DB 마이그레이션 SQL: `supabase/migrations/` (현재 `001_initial_schema.sq
 - Variants A and C — deferred.
 - A test framework.
 - 태그 CRUD UI (현재 DB에서 조회만, 추가/삭제 UI 없음)
-- 프로젝트 CRUD UI (현재 DB에서 조회만)
+- 프로젝트 클릭 → 필터 / 사이드바 view 라우팅 (CRUD 만 구현, 클릭 시 inert)
 - 서브태스크 CRUD (subtotal/subdone 은 표시만)
 - 검색/필터 기능 (UI만)
 
