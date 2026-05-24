@@ -29,7 +29,7 @@ type AppContextValue = {
   /** 새 프로젝트 — id 는 클라이언트가 crypto.randomUUID() 로 미리 발급. */
   createProject: (id: string, name: string, color?: string) => void;
   updateProject: (id: string, fields: { name?: string; color?: string }) => void;
-  /** 삭제 → tasks 의 project 도 낙관적으로 null 로 cascade. */
+  /** 삭제 → tasks 의 projectId 도 낙관적으로 null 로 cascade. */
   deleteProject: (id: string) => void;
   /** 새 태그 — id 는 클라이언트가 crypto.randomUUID() 로 미리 발급. */
   createTag: (id: string, name: string, hue: TagHue) => void;
@@ -102,13 +102,13 @@ function reducer(state: OptimisticState, action: OptimisticAction): OptimisticSt
         ),
       };
     case "project.delete":
-      // cascade: 이 프로젝트에 속한 task 들의 project 필드도 null 로.
+      // cascade: 이 프로젝트에 속한 task 들의 projectId 필드도 null 로.
       // DB 의 ON DELETE SET NULL 과 동일한 결과를 클라이언트에 미리 반영해
       // revalidate 전 0.1-0.3s 동안 lookup miss 가 깜박이지 않게 한다.
       return {
         ...state,
         projects: state.projects.filter((p) => p.id !== action.id),
-        tasks: state.tasks.map((t) => (t.project === action.id ? { ...t, project: null } : t)),
+        tasks: state.tasks.map((t) => (t.projectId === action.id ? { ...t, projectId: null } : t)),
       };
     case "tag.create":
       return { ...state, tags: [...state.tags, action.tag] };

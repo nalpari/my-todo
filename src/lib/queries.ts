@@ -158,8 +158,8 @@ export async function getAppData(): Promise<AppData> {
   // 프로젝트별 미완료 task 수 계산
   const countMap = new Map<string, number>();
   for (const t of tasks) {
-    if (!t.done && t.project) {
-      countMap.set(t.project, (countMap.get(t.project) ?? 0) + 1);
+    if (!t.done && t.projectId) {
+      countMap.set(t.projectId, (countMap.get(t.projectId) ?? 0) + 1);
     }
   }
   const projectsWithCount = projects.map((p) => ({

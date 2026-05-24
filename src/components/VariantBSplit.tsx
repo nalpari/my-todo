@@ -446,7 +446,7 @@ const NowLine = ({ timeStr }: { timeStr: string }) => (
 
 const TimelineCard = ({ task }: { task: Task }) => {
   const { projects, toggleTask, deleteTask, updateTaskTitle } = useApp();
-  const project = task.project ? projects.find((p) => p.id === task.project) : null;
+  const project = task.projectId ? projects.find((p) => p.id === task.projectId) : null;
   const [hovered, setHovered] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
   const [editValue, setEditValue] = useState(task.title);
@@ -531,7 +531,7 @@ const TimelineCard = ({ task }: { task: Task }) => {
 /* ─── Upcoming + progress (right rail) ─────────────────────── */
 const UpcomingItem = ({ task }: { task: Task }) => {
   const { projects } = useApp();
-  const project = task.project ? projects.find((p) => p.id === task.project) : null;
+  const project = task.projectId ? projects.find((p) => p.id === task.projectId) : null;
   const dueDate = task.due_date ? new Date(task.due_date + "T00:00:00") : null;
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 10px", borderRadius: "var(--radius-sm)", borderBottom: "1px solid var(--border)" }}>
@@ -548,7 +548,7 @@ const UpcomingItem = ({ task }: { task: Task }) => {
           {task.title}
         </div>
         <div style={{ marginTop: 3, display: "flex", gap: 6, alignItems: "center" }}>
-          <ProjectDot id={task.project} size={5} />
+          <ProjectDot id={task.projectId} size={5} />
           <span style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--text-faint)", letterSpacing: 0.3 }}>
             {project?.name}
           </span>

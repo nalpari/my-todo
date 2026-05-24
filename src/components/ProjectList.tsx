@@ -120,7 +120,7 @@ const ProjectRow = ({ project, isActive }: { project: Project; isActive: boolean
   };
 
   // 삭제 확인 메시지의 "N개 해제" 카운트 — 낙관 tasks 기준.
-  const affectedCount = tasks.filter((t) => t.project === project.id).length;
+  const affectedCount = tasks.filter((t) => t.projectId === project.id).length;
 
   return (
     <li

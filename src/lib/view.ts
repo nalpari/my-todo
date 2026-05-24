@@ -119,7 +119,7 @@ export function filterTasks(
 ): Task[] {
   return tasks.filter((t) => {
     if (!isTaskInView(t, view)) return false;
-    if (projectId && t.project !== projectId) return false;
+    if (projectId && t.projectId !== projectId) return false;
     if (tagId && !t.tags.includes(tagId)) return false;
     return true;
   });
@@ -145,8 +145,8 @@ export function filterBySearch(
 
   return tasks.filter((t) => {
     if (t.title.toLowerCase().includes(q)) return true;
-    if (t.project) {
-      const name = projectNameById.get(t.project);
+    if (t.projectId) {
+      const name = projectNameById.get(t.projectId);
       if (name && name.includes(q)) return true;
     }
     return false;
