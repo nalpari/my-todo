@@ -36,13 +36,14 @@ There is no test runner configured. Don't invent one when asked to "run the test
 
 ## Architecture
 
-Single-page App Router app (`src/app/page.tsx`) that flips between two screens via local `useState`:
+App Router RSC + Client 혼합 앱:
 
 ```
-AuthScreen ──(onSignIn)──▶ VariantBSplit ──(onSignOut)──▶ AuthScreen
+page.tsx (RSC 인증가드) → getAppData() → VariantBSplit (Client, AppProvider)
+login/page.tsx (RSC 인증가드) → AuthScreen
 ```
 
-No auth backend, no database, no API routes. All data is mock data in `src/lib/data.ts` (`PROJECTS`, `TAGS`, `TASKS`, `DAY_BUCKETS`, `WEEK`). "Today" is **hardcoded as 화요일 5월 26일** to match the source design — treat dates in the UI as fixtures, not live values.
+실제 Supabase DB와 연동. `src/lib/data.ts` 의 mock 데이터는 삭제되고 DB Row 타입/유틸 함수만 남음. "오늘" 날짜는 `useLiveClock()` 훅으로 실시간 갱신됨.
 
 ### Component layers (in `src/components/`)
 
@@ -76,7 +77,7 @@ User-facing strings are in **Korean** (the app name is "치트키 Todo"). Keep n
 
 ## Auth (Supabase)
 
-Google OAuth 만 활성화되어 있고, 데이터는 여전히 mock 입니다. Auth 만 붙고 CRUD 는 다음 phase 입니다.
+Google OAuth 활성화 + 할 일 CRUD 구현 완료.
 
 - **프로젝트**: `tprewdmslvayiihukefg` (region `ap-northeast-2`, Postgres 17)
 - **환경변수** (`.env.example` 참고):
@@ -90,17 +91,61 @@ Google OAuth 만 활성화되어 있고, 데이터는 여전히 mock 입니다. 
     - `proxy.ts` 와 `server.ts` 모두 outbound 쿠키에 강제 옵션을 머지한다: `httpOnly: true`, `secure: NODE_ENV === "production"`, `sameSite: "lax"`, `path: "/"`. supabase/ssr 의 기본값 `httpOnly: false` 를 의도적으로 덮어쓰는 거라 새 supabase 클라이언트를 추가할 때도 동일 패턴 유지.
   - `src/proxy.ts` — Next.js 16 의 proxy convention (구 middleware). 모든 요청에서 세션 쿠키 갱신, 정적 자산 제외 표준 matcher
   - `src/app/{page,login/page}.tsx` — RSC 가드. 인증 상태에 따라 양방향 redirect.
-  - `src/app/auth/actions.ts` — `signInWithGoogle`, `signOut` Server Actions. `try`/`catch` 안에서 `redirect()` 를 직접 호출하지 않고 target URL 만 결정하는 패턴 (NEXT_REDIRECT throw 가 catch 에 잡혀 silent fail 로 빠지는 걸 방지).
+  - `src/app/auth/actions.ts` — `signInWithGoogle`, `signOut` Server Actions.
   - `src/app/auth/callback/route.ts` — OAuth code 교환. 쿠키 write 실패 시 `/login?error=cookie_write_failed` 로 redirect.
 - **로그인/로그아웃 트리거**: 모두 `<form action={…}>` + Server Action. PKCE verifier 와 세션 쿠키 모두 `httpOnly` 라 JS 에서 읽을 수 없음 — XSS 가 나도 토큰 탈취는 막힘.
-- **표시용 사용자 정보**: `page.tsx` 에서 Supabase `User` → `DisplayUser({name,email,avatarUrl?})` 로 추출 후 AppSidebar 로 prop drilling. `full_name` 이 없으면 `email.split("@")[0]` fallback. 아바타는 아직 첫 글자만 표시 (이미지 로드는 다음 PR).
-- **남은 정리** (다음 PR 시작 시): 이번 작업과 무관한 이전 실험 흔적인 `public.todos` 테이블 (20행, 본 앱 스키마와 무관) 과 unused `auth.users` test 계정 정리.
+
+## DB 스키마 (CRUD 구현)
+
+DB 마이그레이션 SQL: `supabase/migrations/` (현재 `001_initial_schema.sql`, `002_rls_with_check.sql`, `003_tenant_isolation.sql`). 원격 적용은 Supabase MCP `apply_migration` 또는 Dashboard SQL Editor 사용. 002 는 001 의 UPDATE 정책에 `WITH CHECK` 를 추가해 소유권 이전 (`user_id` 변경) 공격을 막고, 003 은 외래키 차원의 cross-tenant 참조를 차단한다 (`tasks(project_id, user_id) → projects(id, user_id)` 복합 FK, `task_tags` 에 `user_id` 추가 후 task·tag 양쪽에 복합 FK, `due_time` HH:MM CHECK 제약).
+
+### 테이블 구조
+
+| 테이블 | 설명 |
+|--------|------|
+| `public.projects` | 프로젝트 (user_id FK, name, color) |
+| `public.tags` | 태그 (user_id FK, name, hue: "accent"\|"muted") |
+| `public.tasks` | 할 일 (user_id FK, project_id FK, title, due_date DATE, due_time TEXT, done, subtotal, subdone, sort_order) |
+| `public.task_tags` | N:M 조인 (task_id, tag_id) |
+
+모든 테이블에 RLS 활성화. `auth.uid() = user_id` 기반으로 사용자별 격리.
+
+### 데이터 레이어 파일
+
+| 파일 | 역할 |
+|------|------|
+| `src/lib/data.ts` | 타입 정의 (ProjectRow, TaskRow, Project, Tag, Task, BucketKey), 날짜 유틸 (toISODate, dateToBucket, buildWeek, buildDayBuckets, rowToTask) |
+| `src/lib/queries.ts` | RSC 서버에서 DB fetch (getProjects, getTags, getTasks, getAppData) |
+| `src/lib/AppContext.tsx` | Client 컨텍스트. `useOptimistic` 기반 낙관적 UI (toggleTask, deleteTask, updateTaskTitle). `AppProvider` + `useApp()` 훅 |
+| `src/app/tasks/actions.ts` | Server Actions (createTask, toggleTask, updateTask, deleteTask) + `revalidatePath("/")` |
+
+### CRUD 흐름
+
+1. **읽기**: `page.tsx`(RSC) → `getAppData()` → `AppProvider` props → `useApp()` 로 소비
+2. **추가**: `InputBar` form submit → `createTask` Server Action → `revalidatePath`
+3. **완료 토글**: `Checkbox` click → `useOptimistic` 즉시 반영 → `toggleTask` Server Action
+4. **수정**: 제목 클릭 → 인라인 input → blur/Enter → `updateTaskTitle` → Server Action
+5. **삭제**: 카드 호버 → × 버튼 → `useOptimistic` 즉시 제거 → `deleteTask` Server Action
+
+### 에러 처리 컨벤션 (tasks Server Action)
+
+- 모든 task Server Action 은 실패 시 **throw** 한다 (silent return 금지). DB 에러는 `throw new Error(...)`, 세션 만료는 `redirect("/login?error=session_expired")` (NEXT_REDIRECT 라 try/catch 로 감싸면 안 됨 — `requireUser()` 헬퍼에 일임).
+- 클라이언트는 `AppContext` 의 `runAction` 헬퍼가 try/catch 로 잡아 (1) 에러 메시지를 `error` 상태에 기록, (2) `router.refresh()` 로 서버 상태를 다시 받아 낙관 잔존을 정정한다.
+- `VariantBSplit` 의 `<ErrorToast />` 는 `useApp().error` 를 구독해 하단 토스트로 표시 (4초 자동 닫힘 + 수동 ×). `InputBar` 도 createTask 실패 시 `reportError` + 입력값 복구.
+
+### 입력 검증 컨벤션 (tasks Server Action)
+
+- Server Action 은 사실상 public RPC. TS 타입은 런타임 강제력이 없으므로 client 가 임의 키 (`user_id`, `sort_order` 등) 를 보낼 수 있다. `actions.ts` 의 `parseTitle`/`parseNullableDate`/`parseNullableTime`/`parseNullableUuid` 헬퍼가 키 화이트리스트 + 포맷 검증을 담당. `updateTask` 는 `fields: unknown` 으로 받고 명시된 4개 키만 update 객체에 옮긴다.
+- `project_id` 는 `assertOwnedProject` 로 사전 소유권 확인 후 update — 003 의 복합 FK 가 cross-tenant 참조를 어차피 거부하지만, 사용자에게 명확한 에러 메시지 제공.
 
 ## Not in scope (don't add unprompted)
 
-- Persistent storage — mock data only. 데이터 모델 (Projects/Tags/Tasks) 의 DB 마이그레이션과 RLS 는 다음 phase.
 - Variants A and C — deferred.
 - A test framework.
+- 태그 CRUD UI (현재 DB에서 조회만, 추가/삭제 UI 없음)
+- 프로젝트 CRUD UI (현재 DB에서 조회만)
+- 서브태스크 CRUD (subtotal/subdone 은 표시만)
+- 검색/필터 기능 (UI만)
 
 If a task seems to require any of these, confirm with the user before adding the dependency.
 

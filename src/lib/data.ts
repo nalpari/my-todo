@@ -1,5 +1,44 @@
-/* Shared sample data for the 치트키 Todo app */
+/* ============================================================
+ * 치트키 Todo — 공유 타입 + 유틸리티
+ * DB 레코드 타입(Row*)과 UI 표시용 타입을 분리한다.
+ * ============================================================ */
 
+/* ─── DB Row 타입 (Supabase 스키마와 1:1 대응) ──────────────── */
+
+export type ProjectRow = {
+  id: string;
+  user_id: string;
+  name: string;
+  color: string;
+  created_at: string;
+};
+
+export type TagRow = {
+  id: string;
+  user_id: string;
+  name: string;
+  hue: "accent" | "muted";
+  created_at: string;
+};
+
+export type TaskRow = {
+  id: string;
+  user_id: string;
+  project_id: string | null;
+  title: string;
+  due_date: string | null;   // ISO date "YYYY-MM-DD"
+  due_time: string | null;   // "HH:MM"
+  done: boolean;
+  subtotal: number;
+  subdone: number;
+  sort_order: number;
+  created_at: string;
+  updated_at: string;
+};
+
+/* ─── UI 표시용 타입 ─────────────────────────────────────────── */
+
+/** 사이드바·분포 차트용 프로젝트 (task count 포함) */
 export type Project = {
   id: string;
   name: string;
@@ -13,117 +52,149 @@ export type Tag = {
   hue: "accent" | "muted";
 };
 
+/**
+ * 할 일 타임라인 버킷 키.
+ * DB의 due_date(DATE)를 오늘 기준으로 분류할 때 사용한다.
+ */
 export type BucketKey =
-  | "overdue" | "today" | "tomorrow" | "thu" | "fri" | "next-mon" | "next-tue";
+  | "overdue"
+  | "today"
+  | "tomorrow"
+  | "day3"
+  | "day4"
+  | "day5"
+  | "day6"
+  | "day7"
+  | "later";
 
+/** UI 컴포넌트에 넘기는 Task (DB Row + 파생 필드) */
 export type Task = {
-  id: number;
+  id: string;           // DB uuid
   title: string;
-  project: string;
-  tags: string[];
-  due: BucketKey;
-  time: string | null;
+  project: string | null;   // project_id
+  tags: string[];            // tag id 배열
+  due_date: string | null;  // ISO date
+  due_time: string | null;  // "HH:MM"
   done: boolean;
   subtotal: number;
   subdone: number;
+  /** due_date → 오늘 기준 버킷. 클라이언트에서 계산 */
+  bucket: BucketKey;
 };
 
 export type DayBucket = {
   key: BucketKey;
-  label: string;
-  date: string;
-  fraunces: string;
+  label: string;   // "오늘", "내일", ...
+  date: string;    // "5월 26일, 화" 등
+  fraunces: string; // 영문 헤더
 };
 
 export type WeekDay = {
-  dow: string;
-  dom: number;
-  bucket: BucketKey | null;
+  dow: string;            // "월"~"일"
+  dom: number;            // day-of-month
+  date: string;           // ISO date "YYYY-MM-DD"
   today: boolean;
 };
 
-export const PROJECTS: Project[] = [
-  { id: "p1", name: "AI 치트키 채널", color: "#d97757", count: 8 },
-  { id: "p2", name: "뉴스레터 발행",   color: "#9c8a6a", count: 4 },
-  { id: "p3", name: "사이드 프로젝트", color: "#7a8a9c", count: 6 },
-  { id: "p4", name: "개인",             color: "#6b6964", count: 3 },
-];
+/* ─── 날짜 유틸리티 ─────────────────────────────────────────── */
 
-export const TAGS: Tag[] = [
-  { id: "t1", name: "긴급",   hue: "accent" },
-  { id: "t2", name: "리서치", hue: "muted"  },
-  { id: "t3", name: "디자인", hue: "muted"  },
-  { id: "t4", name: "촬영",   hue: "muted"  },
-  { id: "t5", name: "미팅",   hue: "muted"  },
-];
+/** "YYYY-MM-DD" 문자열 반환 (로컬 시각 기준) */
+export function toISODate(d: Date): string {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
 
-/* Today = 화요일 5월 26일 */
-export const TASKS: Task[] = [
-  { id: 1,  title: "Claude Code 매뉴얼 1차 원고 마감",
-    project: "p1", tags: ["t1"], due: "overdue", time: null,
-    done: false, subtotal: 3, subdone: 2 },
-  { id: 2,  title: "5월 4주차 뉴스레터 발송",
-    project: "p2", tags: [], due: "today", time: "14:00",
-    done: false, subtotal: 4, subdone: 1 },
-  { id: 3,  title: "썸네일 시안 3개 검토",
-    project: "p1", tags: ["t3"], due: "today", time: "16:30",
-    done: false, subtotal: 0, subdone: 0 },
-  { id: 4,  title: "아침 운동 30분",
-    project: "p4", tags: [], due: "today", time: "07:00",
-    done: true,  subtotal: 0, subdone: 0 },
-  { id: 5,  title: "구독자 1만명 기념 영상 기획",
-    project: "p1", tags: ["t2"], due: "today", time: null,
-    done: false, subtotal: 5, subdone: 0 },
+/** due_date(ISO)를 오늘 기준 BucketKey로 변환 */
+export function dateToBucket(dueDate: string | null, today: Date): BucketKey {
+  if (!dueDate) return "later";
+  const due = new Date(dueDate + "T00:00:00"); // 로컬 자정
+  const todayMidnight = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+  const diff = Math.floor((due.getTime() - todayMidnight.getTime()) / 86400000);
+  if (diff < 0) return "overdue";
+  if (diff === 0) return "today";
+  if (diff === 1) return "tomorrow";
+  if (diff === 2) return "day3";
+  if (diff === 3) return "day4";
+  if (diff === 4) return "day5";
+  if (diff === 5) return "day6";
+  if (diff === 6) return "day7";
+  return "later";
+}
 
-  { id: 6,  title: "MCP 서버 데모 촬영",
-    project: "p1", tags: ["t4"], due: "tomorrow", time: "10:00",
-    done: false, subtotal: 0, subdone: 0 },
-  { id: 7,  title: "Notion 자동화 워크플로우 정리",
-    project: "p3", tags: ["t2"], due: "tomorrow", time: null,
-    done: false, subtotal: 3, subdone: 0 },
-  { id: 8,  title: "커피챗 — 이서연 PM",
-    project: "p4", tags: ["t5"], due: "tomorrow", time: "15:00",
-    done: false, subtotal: 0, subdone: 0 },
+/** 오늘 기준 이번 주(월~일) WeekDay 배열 생성 */
+export function buildWeek(today: Date): WeekDay[] {
+  const dow = today.getDay(); // 0=일,1=월,...
+  const monday = new Date(today);
+  monday.setDate(today.getDate() - ((dow + 6) % 7)); // 이번 주 월요일
+  const labels = ["월", "화", "수", "목", "금", "토", "일"];
+  return labels.map((label, i) => {
+    const d = new Date(monday);
+    d.setDate(monday.getDate() + i);
+    return {
+      dow: label,
+      dom: d.getDate(),
+      date: toISODate(d),
+      today: d.toDateString() === today.toDateString(),
+    };
+  });
+}
 
-  { id: 9,  title: "Supabase RLS 정책 리팩토링",
-    project: "p3", tags: [], due: "thu", time: null,
-    done: false, subtotal: 2, subdone: 0 },
-  { id: 10, title: "Fraunces vs Pretendard 비교 글 초안",
-    project: "p2", tags: ["t3"], due: "thu", time: null,
-    done: false, subtotal: 0, subdone: 0 },
+/** 이번 주 DayBucket 배열 생성 (overdue 포함) */
+export function buildDayBuckets(today: Date): DayBucket[] {
+  const week = buildWeek(today);
+  const KO_DOW = ["일", "월", "화", "수", "목", "금", "토"];
+  const EN_DAY = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 
-  { id: 11, title: "주간 회고 — 영상 4편 결산",
-    project: "p1", tags: [], due: "fri", time: "18:00",
-    done: false, subtotal: 0, subdone: 0 },
+  const buckets: DayBucket[] = [
+    { key: "overdue", label: "지난 일정", date: "— 누락", fraunces: "Overdue" },
+  ];
 
-  { id: 12, title: "6월 콘텐츠 캘린더 확정",
-    project: "p1", tags: ["t5"], due: "next-mon", time: "11:00",
-    done: false, subtotal: 4, subdone: 0 },
-  { id: 13, title: "독자 인터뷰 일정 조율 (3명)",
-    project: "p2", tags: ["t2", "t5"], due: "next-tue", time: null,
-    done: false, subtotal: 3, subdone: 0 },
-];
+  week.forEach((w, i) => {
+    const d = new Date(w.date + "T00:00:00");
+    const diff = i; // 0=월,...,6=일
+    const bucketKeys: BucketKey[] = ["today", "tomorrow", "day3", "day4", "day5", "day6", "day7"];
+    const fraunces = [EN_DAY[d.getDay()]];
+    buckets.push({
+      key: w.today ? "today" : bucketKeys[diff] ?? "later",
+      label: w.today
+        ? "오늘"
+        : diff === 1
+        ? "내일"
+        : `${KO_DOW[d.getDay()]}요일`,
+      date: `${d.getMonth() + 1}월 ${d.getDate()}일`,
+      fraunces: fraunces[0] ?? "",
+    });
+  });
 
-export const DAY_BUCKETS: DayBucket[] = [
-  { key: "overdue",  label: "지난 일정",  date: "— 누락",        fraunces: "Overdue"   },
-  { key: "today",    label: "오늘",       date: "5월 26일, 화",  fraunces: "Today"     },
-  { key: "tomorrow", label: "내일",       date: "5월 27일, 수",  fraunces: "Tomorrow"  },
-  { key: "thu",      label: "목요일",     date: "5월 28일",      fraunces: "Thursday"  },
-  { key: "fri",      label: "금요일",     date: "5월 29일",      fraunces: "Friday"    },
-  { key: "next-mon", label: "다음 주 월", date: "6월 1일",       fraunces: "Next Mon"  },
-  { key: "next-tue", label: "다음 주 화", date: "6월 2일",       fraunces: "Next Tue"  },
-];
+  return buckets;
+}
 
-export const WEEK: WeekDay[] = [
-  { dow: "월", dom: 25, bucket: null,        today: false },
-  { dow: "화", dom: 26, bucket: "today",     today: true  },
-  { dow: "수", dom: 27, bucket: "tomorrow",  today: false },
-  { dow: "목", dom: 28, bucket: "thu",       today: false },
-  { dow: "금", dom: 29, bucket: "fri",       today: false },
-  { dow: "토", dom: 30, bucket: null,        today: false },
-  { dow: "일", dom: 31, bucket: null,        today: false },
-];
+/* ─── TaskRow → Task 변환 ──────────────────────────────────── */
 
-export const projectById = (id: string) => PROJECTS.find((p) => p.id === id);
-export const tagById     = (id: string) => TAGS.find((t) => t.id === id);
-export const tasksByBucket = (key: BucketKey) => TASKS.filter((t) => t.due === key);
+export function rowToTask(row: TaskRow, tagIds: string[], today: Date): Task {
+  return {
+    id: row.id,
+    title: row.title,
+    project: row.project_id,
+    tags: tagIds,
+    due_date: row.due_date,
+    due_time: row.due_time,
+    done: row.done,
+    subtotal: row.subtotal,
+    subdone: row.subdone,
+    bucket: dateToBucket(row.due_date, today),
+  };
+}
+
+/* ─── 헬퍼 함수 ─────────────────────────────────────────────── */
+
+export const projectById = (projects: Project[], id: string | null) =>
+  projects.find((p) => p.id === id);
+
+export const tagById = (tags: Tag[], id: string) =>
+  tags.find((t) => t.id === id);
+
+export const tasksByBucket = (tasks: Task[], key: BucketKey) =>
+  tasks.filter((t) => t.bucket === key);

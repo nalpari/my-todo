@@ -2,21 +2,27 @@
 
 import type { CSSProperties } from "react";
 import { useFormStatus } from "react-dom";
+import { useRef, useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
 import { signOut } from "@/app/auth/actions";
-import { KeyHint, MonoLabel, ProjectDot, TagChip } from "./Primitives";
-import { PROJECTS, TAGS } from "@/lib/data";
+import { createTask } from "@/app/tasks/actions";
+import { KeyHint, MonoLabel, TagChip } from "./Primitives";
+import { useApp } from "@/lib/AppContext";
+import { toISODate } from "@/lib/data";
 
 export type DisplayUser = { name: string; email: string; avatarUrl?: string };
 
 type SidebarProps = { active?: string; compact?: boolean; user: DisplayUser };
 
 export const AppSidebar = ({ active = "today", compact = false, user }: SidebarProps) => {
+  const { projects, tags, tasks } = useApp();
+
   const navItems = [
-    { id: "today",    label: "오늘",   count: 5,  kbd: "⌘1" },
-    { id: "upcoming", label: "예정",   count: 8,  kbd: "⌘2" },
-    { id: "inbox",    label: "인박스", count: 2,  kbd: "⌘3" },
-    { id: "someday",  label: "언젠가", count: 12, kbd: null },
-    { id: "done",     label: "완료",   count: 47, kbd: null },
+    { id: "today",    label: "오늘",   count: tasks.filter((t) => t.bucket === "today" && !t.done).length,    kbd: "⌘1" },
+    { id: "upcoming", label: "예정",   count: tasks.filter((t) => !["today", "overdue"].includes(t.bucket) && !t.done).length, kbd: "⌘2" },
+    { id: "inbox",    label: "인박스", count: tasks.filter((t) => !t.due_date && !t.done).length,              kbd: "⌘3" },
+    { id: "someday",  label: "언젠가", count: tasks.filter((t) => t.bucket === "later" && !t.done).length,     kbd: null },
+    { id: "done",     label: "완료",   count: tasks.filter((t) => t.done).length,                              kbd: null },
   ];
 
   return (
@@ -67,7 +73,7 @@ export const AppSidebar = ({ active = "today", compact = false, user }: SidebarP
           <button style={S.addBtn} aria-label="add project" type="button">+</button>
         </div>
         <ul style={S.projList}>
-          {PROJECTS.map((p) => (
+          {projects.map((p) => (
             <li key={p.id} style={S.projRow}>
               <span
                 style={{
@@ -91,7 +97,7 @@ export const AppSidebar = ({ active = "today", compact = false, user }: SidebarP
           <MonoLabel tracking={1.4} size={10}>Tags</MonoLabel>
         </div>
         <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-          {TAGS.map((t) => (
+          {tags.map((t) => (
             <TagChip key={t.id} id={t.id} small />
           ))}
         </div>
@@ -114,57 +120,106 @@ export const AppSidebar = ({ active = "today", compact = false, user }: SidebarP
 
 export const AppTopBar = ({
   title = "오늘",
-  subtitle = "5월 26일, 화요일",
+  subtitle,
   dense = false,
 }: {
   title?: string;
   subtitle?: string;
   dense?: boolean;
-}) => (
-  <div style={{ ...S.topbar, padding: dense ? "14px 32px" : "20px 40px" }}>
-    <div style={{ display: "flex", alignItems: "baseline", gap: 14, minWidth: 0 }}>
-      <h1 style={S.topTitle}>{title}</h1>
-      <span style={S.topSub}>{subtitle}</span>
-    </div>
-    <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-      <div style={S.search}>
-        <svg width="13" height="13" viewBox="0 0 16 16" fill="none" style={{ opacity: 0.5 }}>
-          <circle cx="7" cy="7" r="4.5" stroke="currentColor" strokeWidth="1.4" />
-          <path d="M10.5 10.5l3 3" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
-        </svg>
-        <span style={{ color: "var(--text-faint)", fontSize: 13 }}>할 일, 프로젝트 검색</span>
-        <span style={{ marginLeft: "auto", display: "flex", gap: 4 }}>
-          <KeyHint>⌘</KeyHint>
-          <KeyHint>K</KeyHint>
-        </span>
-      </div>
-      <button style={S.filterBtn} type="button">
-        <span>필터</span>
-        <span style={{ color: "var(--accent)" }}>· 2</span>
-      </button>
-    </div>
-  </div>
-);
+}) => {
+  // 실시간 날짜는 VariantBSplit에서 내려줌 — 없으면 오늘 날짜 폴백
+  const defaultSubtitle = subtitle ?? (() => {
+    const now = new Date();
+    return `${now.getMonth() + 1}월 ${now.getDate()}일, ${["일", "월", "화", "수", "목", "금", "토"][now.getDay()]}요일`;
+  })();
 
-export const InputBar = ({ floating = false }: { floating?: boolean }) => (
-  <div style={{ ...S.inputBar, ...(floating ? S.inputBarFloating : {}) }}>
-    <span style={S.inputPlus}>+</span>
-    <input
-      placeholder="할 일 추가 — 내용을 적고 Enter, # 으로 프로젝트, @ 로 마감일"
-      style={S.inputField}
-      readOnly
-    />
-    <div style={S.inputChips}>
-      <span style={S.chipMuted}>
-        <ProjectDot id="p1" size={6} /> AI 치트키 채널
-      </span>
-      <span style={S.chipAccent}>오늘</span>
+  return (
+    <div style={{ ...S.topbar, padding: dense ? "14px 32px" : "20px 40px" }}>
+      <div style={{ display: "flex", alignItems: "baseline", gap: 14, minWidth: 0 }}>
+        <h1 style={S.topTitle}>{title}</h1>
+        <span style={S.topSub}>{defaultSubtitle}</span>
+      </div>
+      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+        <div style={S.search}>
+          <svg width="13" height="13" viewBox="0 0 16 16" fill="none" style={{ opacity: 0.5 }}>
+            <circle cx="7" cy="7" r="4.5" stroke="currentColor" strokeWidth="1.4" />
+            <path d="M10.5 10.5l3 3" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+          </svg>
+          <span style={{ color: "var(--text-faint)", fontSize: 13 }}>할 일, 프로젝트 검색</span>
+          <span style={{ marginLeft: "auto", display: "flex", gap: 4 }}>
+            <KeyHint>⌘</KeyHint>
+            <KeyHint>K</KeyHint>
+          </span>
+        </div>
+        <button style={S.filterBtn} type="button">
+          <span>필터</span>
+          <span style={{ color: "var(--accent)" }}>· 2</span>
+        </button>
+      </div>
     </div>
-    <span style={{ display: "flex", gap: 4 }}>
-      <KeyHint>↵</KeyHint>
-    </span>
-  </div>
-);
+  );
+};
+
+/* ─── InputBar (활성화) ─────────────────────────────────────── */
+
+export const InputBar = ({ floating = false }: { floating?: boolean }) => {
+  const formRef = useRef<HTMLFormElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const [value, setValue] = useState("");
+  const [, startTransition] = useTransition();
+  const { reportError } = useApp();
+  const router = useRouter();
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    const trimmed = value.trim();
+    if (!trimmed) return;
+
+    const fd = new FormData();
+    fd.set("title", trimmed);
+    fd.set("due_date", toISODate(new Date())); // 기본: 오늘
+
+    // 낙관적으로 input 을 비우되, 실패 시 복원해서 사용자 입력 손실을 막는다.
+    setValue("");
+    inputRef.current?.focus();
+
+    startTransition(async () => {
+      try {
+        await createTask(fd);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : "task 생성 실패";
+        reportError(msg);
+        setValue(trimmed);
+        router.refresh();
+      }
+    });
+  };
+
+  return (
+    <form
+      ref={formRef}
+      onSubmit={handleSubmit}
+      style={{ ...S.inputBar, ...(floating ? S.inputBarFloating : {}) }}
+    >
+      <span style={S.inputPlus}>+</span>
+      <input
+        ref={inputRef}
+        name="title"
+        value={value}
+        onChange={(e) => setValue(e.target.value)}
+        placeholder="할 일 추가 — 내용을 적고 Enter, # 으로 프로젝트, @ 로 마감일"
+        style={S.inputField}
+        autoComplete="off"
+      />
+      <div style={S.inputChips}>
+        <span style={S.chipAccent}>오늘</span>
+      </div>
+      <span style={{ display: "flex", gap: 4 }}>
+        <KeyHint>↵</KeyHint>
+      </span>
+    </form>
+  );
+};
 
 const S: Record<string, CSSProperties> = {
   sidebar: {
@@ -299,14 +354,6 @@ const S: Record<string, CSSProperties> = {
     letterSpacing: -0.1,
   },
   inputChips: { display: "flex", gap: 6 },
-  chipMuted: {
-    display: "inline-flex", alignItems: "center", gap: 6,
-    padding: "3px 9px", borderRadius: "var(--radius-full)",
-    border: "1px solid var(--border)",
-    background: "rgba(255,255,255,0.03)",
-    fontSize: 11, color: "var(--text-muted)",
-    fontFamily: "var(--font-mono)", letterSpacing: 0.2,
-  },
   chipAccent: {
     padding: "3px 9px", borderRadius: "var(--radius-full)",
     border: "1px solid var(--border-accent)",
@@ -330,7 +377,6 @@ function SignOutButton() {
       type="submit"
       disabled={pending}
     >
-      {/* door + arrow-out — universal logout glyph (kebab 와 혼동 방지) */}
       <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
         <path d="M6.5 2.5h-3a1 1 0 0 0-1 1v9a1 1 0 0 0 1 1h3" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
         <path d="M10.5 5l3 3-3 3" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" />

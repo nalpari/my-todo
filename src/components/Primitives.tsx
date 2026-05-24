@@ -1,7 +1,8 @@
 "use client";
 
 import type { CSSProperties, ReactNode } from "react";
-import { projectById, tagById, type DayBucket } from "@/lib/data";
+import { useApp } from "@/lib/AppContext";
+import { type DayBucket } from "@/lib/data";
 
 /* ─── Checkbox ───────────────────────────────────────────── */
 export const Checkbox = ({
@@ -39,8 +40,9 @@ export const Checkbox = ({
 };
 
 /* ─── Small atoms ────────────────────────────────────────── */
-export const ProjectDot = ({ id, size = 7 }: { id: string; size?: number }) => {
-  const p = projectById(id);
+export const ProjectDot = ({ id, size = 7 }: { id: string | null; size?: number }) => {
+  const { projects } = useApp();
+  const p = id ? projects.find((pr) => pr.id === id) : null;
   return (
     <span
       style={{
@@ -56,7 +58,8 @@ export const ProjectDot = ({ id, size = 7 }: { id: string; size?: number }) => {
 };
 
 export const TagChip = ({ id, small = false }: { id: string; small?: boolean }) => {
-  const t = tagById(id);
+  const { tags } = useApp();
+  const t = tags.find((tg) => tg.id === id);
   if (!t) return null;
   const isAccent = t.hue === "accent";
   return (
