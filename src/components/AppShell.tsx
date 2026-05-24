@@ -3,6 +3,7 @@
 import type { CSSProperties } from "react";
 import { useFormStatus } from "react-dom";
 import { useRef, useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
 import { signOut } from "@/app/auth/actions";
 import { createTask } from "@/app/tasks/actions";
 import { KeyHint, MonoLabel, TagChip } from "./Primitives";
@@ -166,21 +167,32 @@ export const InputBar = ({ floating = false }: { floating?: boolean }) => {
   const inputRef = useRef<HTMLInputElement>(null);
   const [value, setValue] = useState("");
   const [, startTransition] = useTransition();
+  const { reportError } = useApp();
+  const router = useRouter();
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!value.trim()) return;
+    const trimmed = value.trim();
+    if (!trimmed) return;
 
     const fd = new FormData();
-    fd.set("title", value.trim());
+    fd.set("title", trimmed);
     fd.set("due_date", toISODate(new Date())); // 기본: 오늘
 
-    startTransition(async () => {
-      await createTask(fd);
-    });
-
+    // 낙관적으로 input 을 비우되, 실패 시 복원해서 사용자 입력 손실을 막는다.
     setValue("");
     inputRef.current?.focus();
+
+    startTransition(async () => {
+      try {
+        await createTask(fd);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : "task 생성 실패";
+        reportError(msg);
+        setValue(trimmed);
+        router.refresh();
+      }
+    });
   };
 
   return (

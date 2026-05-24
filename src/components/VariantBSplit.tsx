@@ -10,6 +10,55 @@ import { toISODate, type Task } from "@/lib/data";
 import { type AppData } from "@/lib/queries";
 import { TagChip } from "./Primitives";
 
+/* ─── ErrorToast ────────────────────────────────────────────── */
+const ErrorToast = () => {
+  const { error, dismissError } = useApp();
+
+  useEffect(() => {
+    if (!error) return;
+    const id = setTimeout(() => dismissError(), 4000);
+    return () => clearTimeout(id);
+  }, [error, dismissError]);
+
+  if (!error) return null;
+
+  return (
+    <div
+      role="alert"
+      style={{
+        position: "fixed", left: "50%", bottom: 92,
+        transform: "translateX(-50%)",
+        display: "flex", alignItems: "center", gap: 10,
+        padding: "10px 14px",
+        borderRadius: "var(--radius)",
+        border: "1px solid var(--border-accent)",
+        background: "rgba(45,44,42,0.96)",
+        boxShadow: "var(--shadow-lg)",
+        color: "var(--accent-bright)",
+        fontSize: 13, letterSpacing: -0.1,
+        zIndex: 100,
+        maxWidth: "min(520px, calc(100% - 80px))",
+      }}
+    >
+      <span style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--accent)", letterSpacing: 0.5 }}>!</span>
+      <span style={{ flex: 1, color: "var(--text-display)" }}>{error}</span>
+      <button
+        onClick={dismissError}
+        aria-label="닫기"
+        type="button"
+        style={{
+          width: 18, height: 18, borderRadius: 3,
+          background: "transparent", border: "none",
+          color: "var(--text-muted)", cursor: "pointer",
+          fontSize: 14, lineHeight: 1, padding: 0,
+        }}
+      >
+        ×
+      </button>
+    </div>
+  );
+};
+
 /* ─── Variant B: Calendar + Timeline Split ─────────────────── */
 export const VariantBSplit = ({ user, appData }: { user: DisplayUser; appData: AppData }) => {
   return (
@@ -217,6 +266,7 @@ const VariantBSplitInner = ({ user }: { user: DisplayUser }) => {
           </aside>
         </div>
       </div>
+      <ErrorToast />
     </div>
   );
 };

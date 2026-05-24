@@ -97,7 +97,7 @@ Google OAuth 활성화 + 할 일 CRUD 구현 완료.
 
 ## DB 스키마 (CRUD 구현)
 
-DB 마이그레이션 SQL: `supabase/migrations/001_initial_schema.sql` — Supabase Dashboard SQL Editor 에서 실행.
+DB 마이그레이션 SQL: `supabase/migrations/` (현재 `001_initial_schema.sql`, `002_rls_with_check.sql`). 원격 적용은 Supabase MCP `apply_migration` 또는 Dashboard SQL Editor 사용. 002 는 001 의 UPDATE 정책에 `WITH CHECK` 를 추가해 소유권 이전 (`user_id` 변경) 공격을 막는다.
 
 ### 테이블 구조
 
@@ -126,6 +126,12 @@ DB 마이그레이션 SQL: `supabase/migrations/001_initial_schema.sql` — Supa
 3. **완료 토글**: `Checkbox` click → `useOptimistic` 즉시 반영 → `toggleTask` Server Action
 4. **수정**: 제목 클릭 → 인라인 input → blur/Enter → `updateTaskTitle` → Server Action
 5. **삭제**: 카드 호버 → × 버튼 → `useOptimistic` 즉시 제거 → `deleteTask` Server Action
+
+### 에러 처리 컨벤션 (tasks Server Action)
+
+- 모든 task Server Action 은 실패 시 **throw** 한다 (silent return 금지). DB 에러는 `throw new Error(...)`, 세션 만료는 `redirect("/login?error=session_expired")` (NEXT_REDIRECT 라 try/catch 로 감싸면 안 됨 — `requireUser()` 헬퍼에 일임).
+- 클라이언트는 `AppContext` 의 `runAction` 헬퍼가 try/catch 로 잡아 (1) 에러 메시지를 `error` 상태에 기록, (2) `router.refresh()` 로 서버 상태를 다시 받아 낙관 잔존을 정정한다.
+- `VariantBSplit` 의 `<ErrorToast />` 는 `useApp().error` 를 구독해 하단 토스트로 표시 (4초 자동 닫힘 + 수동 ×). `InputBar` 도 createTask 실패 시 `reportError` + 입력값 복구.
 
 ## Not in scope (don't add unprompted)
 

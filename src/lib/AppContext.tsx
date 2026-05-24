@@ -1,6 +1,7 @@
 "use client";
 
-import { createContext, useContext, useOptimistic, useCallback, startTransition, type ReactNode } from "react";
+import { createContext, useContext, useOptimistic, useCallback, useState, startTransition, type ReactNode } from "react";
+import { useRouter } from "next/navigation";
 import { type Project, type Tag, type Task } from "@/lib/data";
 import { type AppData } from "@/lib/queries";
 import { toggleTask as toggleTaskAction, deleteTask as deleteTaskAction, updateTask as updateTaskAction } from "@/app/tasks/actions";
@@ -11,10 +12,15 @@ type AppContextValue = {
   projects: Project[];
   tags: Tag[];
   tasks: Task[];
-  /** currentDone: 현재 표시 중인 done 값. stale closure 방지용 */
+  /** currentDone: 서버에 보낼 새 done 값 계산용 (낙관 reducer 는 자체 toggle) */
   toggleTask: (id: string, currentDone: boolean) => void;
   deleteTask: (id: string) => void;
   updateTaskTitle: (id: string, title: string) => void;
+  /** 가장 최근 액션 실패 메시지. null 이면 토스트 숨김 */
+  error: string | null;
+  /** 외부에서도 에러 띄울 수 있게 노출 (예: InputBar) */
+  reportError: (msg: string) => void;
+  dismissError: () => void;
 };
 
 const AppContext = createContext<AppContextValue | null>(null);
@@ -22,6 +28,9 @@ const AppContext = createContext<AppContextValue | null>(null);
 /* ─── Provider ──────────────────────────────────────────────── */
 
 export function AppProvider({ appData, children }: { appData: AppData; children: ReactNode }) {
+  const router = useRouter();
+  const [error, setError] = useState<string | null>(null);
+
   const [optimisticTasks, applyOptimistic] = useOptimistic(
     appData.tasks,
     (tasks: Task[], update: { type: "toggle"; id: string } | { type: "delete"; id: string } | { type: "updateTitle"; id: string; title: string }) => {
@@ -40,35 +49,55 @@ export function AppProvider({ appData, children }: { appData: AppData; children:
 
   // useOptimistic dispatch 는 transition/action 안에서만 호출해야 함 (React 19).
   // 일반 onClick 핸들러에서 직접 호출하면 "Optimistic state update outside Transition or Action" 경고.
+  //
+  // Server Action 이 throw 하면 (1) try/catch 로 잡아 에러 메시지를 띄우고
+  // (2) router.refresh() 로 서버 상태를 다시 가져와 낙관 잔존을 정정한다.
+  const runAction = useCallback(
+    async (action: () => Promise<void>) => {
+      try {
+        await action();
+        setError(null);
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : "알 수 없는 오류";
+        setError(msg);
+        router.refresh();
+      }
+    },
+    [router],
+  );
+
   const toggleTask = useCallback(
     (id: string, currentDone: boolean) => {
-      startTransition(async () => {
+      startTransition(() => {
         applyOptimistic({ type: "toggle", id });
-        await toggleTaskAction(id, !currentDone);
+        void runAction(() => toggleTaskAction(id, !currentDone));
       });
     },
-    [applyOptimistic],
+    [applyOptimistic, runAction],
   );
 
   const deleteTask = useCallback(
     (id: string) => {
-      startTransition(async () => {
+      startTransition(() => {
         applyOptimistic({ type: "delete", id });
-        await deleteTaskAction(id);
+        void runAction(() => deleteTaskAction(id));
       });
     },
-    [applyOptimistic],
+    [applyOptimistic, runAction],
   );
 
   const updateTaskTitle = useCallback(
     (id: string, title: string) => {
-      startTransition(async () => {
+      startTransition(() => {
         applyOptimistic({ type: "updateTitle", id, title });
-        await updateTaskAction(id, { title });
+        void runAction(() => updateTaskAction(id, { title }));
       });
     },
-    [applyOptimistic],
+    [applyOptimistic, runAction],
   );
+
+  const reportError = useCallback((msg: string) => setError(msg), []);
+  const dismissError = useCallback(() => setError(null), []);
 
   return (
     <AppContext.Provider
@@ -79,6 +108,9 @@ export function AppProvider({ appData, children }: { appData: AppData; children:
         toggleTask,
         deleteTask,
         updateTaskTitle,
+        error,
+        reportError,
+        dismissError,
       }}
     >
       {children}
