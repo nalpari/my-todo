@@ -86,11 +86,13 @@ Google OAuth 만 활성화되어 있고, 데이터는 여전히 mock 입니다. 
 - **인증 흐름**: `/` (RSC 가드) → 미인증 시 `/login` → `signInWithGoogle` Server Action → Google → `/auth/callback` 에서 `exchangeCodeForSession` → `/` 복귀. 실패 시 `/login?error=…` 로 돌아오고 AuthScreen 카드 위에 한 줄 표시.
 - **핵심 파일**:
   - `src/lib/supabase/{client,server,proxy}.ts` — `@supabase/ssr` 의 세 가지 클라이언트
+    - `server.ts` 는 의도가 다른 두 팩토리를 export 한다: **`createClient`** (RSC 가드 — `setAll` 실패를 swallow, 세션 갱신은 proxy 가 담당) vs **`createMutableClient`** (Route Handler / Server Action — 쿠키 set 이 본질이므로 실패는 throw → 호출처가 `cookie_write_failed` 로 명시적 redirect). RSC 가드(`page.tsx`, `login/page.tsx`) 외에는 반드시 mutable 사용.
+    - `proxy.ts` 와 `server.ts` 모두 outbound 쿠키에 강제 옵션을 머지한다: `httpOnly: true`, `secure: NODE_ENV === "production"`, `sameSite: "lax"`, `path: "/"`. supabase/ssr 의 기본값 `httpOnly: false` 를 의도적으로 덮어쓰는 거라 새 supabase 클라이언트를 추가할 때도 동일 패턴 유지.
   - `src/proxy.ts` — Next.js 16 의 proxy convention (구 middleware). 모든 요청에서 세션 쿠키 갱신, 정적 자산 제외 표준 matcher
   - `src/app/{page,login/page}.tsx` — RSC 가드. 인증 상태에 따라 양방향 redirect.
-  - `src/app/auth/actions.ts` — `signInWithGoogle`, `signOut` Server Actions
-  - `src/app/auth/callback/route.ts` — OAuth code 교환
-- **로그인/로그아웃 트리거**: 모두 `<form action={…}>` + Server Action. PKCE verifier 가 httpOnly cookie 에 저장되어 XSS 안전.
+  - `src/app/auth/actions.ts` — `signInWithGoogle`, `signOut` Server Actions. `try`/`catch` 안에서 `redirect()` 를 직접 호출하지 않고 target URL 만 결정하는 패턴 (NEXT_REDIRECT throw 가 catch 에 잡혀 silent fail 로 빠지는 걸 방지).
+  - `src/app/auth/callback/route.ts` — OAuth code 교환. 쿠키 write 실패 시 `/login?error=cookie_write_failed` 로 redirect.
+- **로그인/로그아웃 트리거**: 모두 `<form action={…}>` + Server Action. PKCE verifier 와 세션 쿠키 모두 `httpOnly` 라 JS 에서 읽을 수 없음 — XSS 가 나도 토큰 탈취는 막힘.
 - **표시용 사용자 정보**: `page.tsx` 에서 Supabase `User` → `DisplayUser({name,email,avatarUrl?})` 로 추출 후 AppSidebar 로 prop drilling. `full_name` 이 없으면 `email.split("@")[0]` fallback. 아바타는 아직 첫 글자만 표시 (이미지 로드는 다음 PR).
 - **남은 정리** (다음 PR 시작 시): 이번 작업과 무관한 이전 실험 흔적인 `public.todos` 테이블 (20행, 본 앱 스키마와 무관) 과 unused `auth.users` test 계정 정리.
 
