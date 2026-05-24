@@ -51,3 +51,6 @@ next-env.d.ts
 
 # graphify output
 /graphify-out
+
+# kilo code (로컬 상태 — agent-manager.json, worktrees/, node_modules)
+.kilo/
