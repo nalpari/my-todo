@@ -7,6 +7,8 @@ export async function proxy(request: NextRequest) {
 
 export const config = {
   matcher: [
-    "/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)",
+    // auth/callback 은 자체 route handler 가 exchangeCodeForSession 으로 세션 쿠키를 직접 set 하므로
+    // proxy 의 사전 getUser 호출과 충돌할 수 있어 제외.
+    "/((?!_next/static|_next/image|favicon.ico|auth/callback|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)",
   ],
 };

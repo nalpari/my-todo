@@ -1,6 +1,7 @@
 "use client";
 
 import type { CSSProperties } from "react";
+import { useFormStatus } from "react-dom";
 import { signOut } from "@/app/auth/actions";
 import { KeyHint, MonoLabel, ProjectDot, TagChip } from "./Primitives";
 import { PROJECTS, TAGS } from "@/lib/data";
@@ -28,13 +29,7 @@ export const AppSidebar = ({ active = "today", compact = false, user }: SidebarP
           <div style={S.userEmail}>{user.email}</div>
         </div>
         <form action={signOut}>
-          <button style={S.iconBtn} aria-label="sign out" type="submit">
-            <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
-              <circle cx="3" cy="8" r="1.5" fill="currentColor" />
-              <circle cx="8" cy="8" r="1.5" fill="currentColor" />
-              <circle cx="13" cy="8" r="1.5" fill="currentColor" />
-            </svg>
-          </button>
+          <SignOutButton />
         </form>
       </div>
 
@@ -320,3 +315,27 @@ const S: Record<string, CSSProperties> = {
     fontFamily: "var(--font-mono)", letterSpacing: 0.4,
   },
 };
+
+function SignOutButton() {
+  const { pending } = useFormStatus();
+  return (
+    <button
+      style={{
+        ...S.iconBtn,
+        opacity: pending ? 0.5 : 1,
+        cursor: pending ? "wait" : "pointer",
+      }}
+      aria-label="로그아웃"
+      title="로그아웃"
+      type="submit"
+      disabled={pending}
+    >
+      {/* door + arrow-out — universal logout glyph (kebab 와 혼동 방지) */}
+      <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+        <path d="M6.5 2.5h-3a1 1 0 0 0-1 1v9a1 1 0 0 0 1 1h3" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
+        <path d="M10.5 5l3 3-3 3" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" />
+        <path d="M13.5 8h-7" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
+      </svg>
+    </button>
+  );
+}

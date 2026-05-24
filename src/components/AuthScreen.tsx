@@ -1,6 +1,7 @@
 import type { CSSProperties } from "react";
 import { signInWithGoogle } from "@/app/auth/actions";
-import { GoogleIcon, LogoMark, MonoLabel } from "./Primitives";
+import { GoogleSignInButton } from "./GoogleSignInButton";
+import { LogoMark, MonoLabel } from "./Primitives";
 
 /* AuthScreen — editorial landing + Google sign-in. */
 export const AuthScreen = ({ error }: { error?: string }) => {
@@ -89,10 +90,7 @@ export const AuthScreen = ({ error }: { error?: string }) => {
             </p>
 
             <form action={signInWithGoogle}>
-              <button style={S.googleBtn} type="submit">
-                <GoogleIcon size={18} />
-                <span>Google 계정으로 계속하기</span>
-              </button>
+              <GoogleSignInButton style={S.googleBtn} />
             </form>
 
             <div style={S.divider}>
