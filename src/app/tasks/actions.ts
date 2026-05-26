@@ -52,6 +52,17 @@ function parseNullableUuid(raw: unknown): string | null {
   return raw;
 }
 
+/**
+ * projects/tags/actions.ts 와 동일한 변환 규칙.
+ * 23505 (unique_violation) → "이미 사용 중인 이름입니다"
+ * 23503 (foreign_key_violation) → "참조 대상을 찾을 수 없습니다"
+ */
+function translateDbError(prefix: string, error: { code?: string; message: string }): Error {
+  if (error.code === "23505") return new Error("이미 사용 중인 이름입니다");
+  if (error.code === "23503") return new Error("참조 대상을 찾을 수 없습니다");
+  return new Error(`${prefix}: ${error.message}`);
+}
+
 async function assertOwnedProject(
   supabase: Awaited<ReturnType<typeof createMutableClient>>,
   projectId: string,
@@ -67,6 +78,11 @@ async function assertOwnedProject(
   if (!data) throw new Error("해당 프로젝트를 찾을 수 없습니다");
 }
 
+/**
+ * SELECT-then-INSERT 의 race window 를 보완: INSERT 가 23505 로 실패하면
+ * 동시 요청이 같은 이름을 먼저 만들었다는 뜻이므로 다시 SELECT 해서 그 id 를
+ * 돌려준다. 일반 케이스(이미 존재)는 1 query, 신규 1 query, race 시 3 queries.
+ */
 async function ensureProject(
   supabase: Awaited<ReturnType<typeof createMutableClient>>,
   name: string,
@@ -87,8 +103,19 @@ async function ensureProject(
     .select("id")
     .single();
 
-  if (error) throw new Error(`프로젝트 생성 실패: ${error.message}`);
-  return data.id;
+  if (!error) return data.id;
+
+  if (error.code === "23505") {
+    const { data: raced } = await supabase
+      .from("projects")
+      .select("id")
+      .eq("user_id", userId)
+      .eq("name", name)
+      .maybeSingle();
+    if (raced) return raced.id;
+  }
+
+  throw translateDbError("프로젝트 생성 실패", error);
 }
 
 async function ensureFeature(
@@ -113,8 +140,20 @@ async function ensureFeature(
     .select("id")
     .single();
 
-  if (error) throw new Error(`기능 생성 실패: ${error.message}`);
-  return data.id;
+  if (!error) return data.id;
+
+  if (error.code === "23505") {
+    const { data: raced } = await supabase
+      .from("features")
+      .select("id")
+      .eq("user_id", userId)
+      .eq("project_id", projectId)
+      .eq("name", name)
+      .maybeSingle();
+    if (raced) return raced.id;
+  }
+
+  throw translateDbError("기능 생성 실패", error);
 }
 
 async function ensureTags(
@@ -143,8 +182,25 @@ async function ensureTags(
       .select("id")
       .single();
 
-    if (error) throw new Error(`태그 생성 실패: ${error.message}`);
-    ids.push(data.id);
+    if (!error) {
+      ids.push(data.id);
+      continue;
+    }
+
+    if (error.code === "23505") {
+      const { data: raced } = await supabase
+        .from("tags")
+        .select("id")
+        .eq("user_id", userId)
+        .eq("name", name)
+        .maybeSingle();
+      if (raced) {
+        ids.push(raced.id);
+        continue;
+      }
+    }
+
+    throw translateDbError("태그 생성 실패", error);
   }
 
   return ids;
@@ -186,7 +242,7 @@ export async function createTask(formData: FormData) {
     .select("id")
     .single();
 
-  if (taskError) throw new Error(`task 생성 실패: ${taskError.message}`);
+  if (taskError) throw translateDbError("task 생성 실패", taskError);
 
   if (tagIds.length > 0) {
     const { error: tagError } = await supabase.from("task_tags").insert(
@@ -197,7 +253,7 @@ export async function createTask(formData: FormData) {
       })),
     );
 
-    if (tagError) throw new Error(`태그 연결 실패: ${tagError.message}`);
+    if (tagError) throw translateDbError("태그 연결 실패", tagError);
   }
 
   revalidatePath("/");
