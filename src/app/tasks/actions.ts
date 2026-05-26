@@ -95,10 +95,12 @@ async function ensureFeature(
   supabase: Awaited<ReturnType<typeof createMutableClient>>,
   projectId: string,
   name: string,
+  userId: string,
 ): Promise<string> {
   const { data: existing } = await supabase
     .from("features")
     .select("id")
+    .eq("user_id", userId)
     .eq("project_id", projectId)
     .eq("name", name)
     .maybeSingle();
@@ -107,7 +109,7 @@ async function ensureFeature(
 
   const { data, error } = await supabase
     .from("features")
-    .insert({ project_id: projectId, name })
+    .insert({ user_id: userId, project_id: projectId, name })
     .select("id")
     .single();
 
@@ -156,7 +158,9 @@ export async function createTask(formData: FormData) {
 
   const parsed = parseTaskInput(rawInput);
   if (!parsed) {
-    throw new Error("형식: [프로젝트:기능] #태그 할 일");
+    throw new Error(
+      "형식: [프로젝트:기능] #태그 할 일 — 예시: [디자인:로그인] #urgent 버튼 색상 변경",
+    );
   }
 
   const { project, feature, tags, title } = parsed;
@@ -166,7 +170,7 @@ export async function createTask(formData: FormData) {
   const { supabase, user } = await requireUser();
 
   const projectId = await ensureProject(supabase, project, user.id);
-  const featureId = await ensureFeature(supabase, projectId, feature);
+  const featureId = await ensureFeature(supabase, projectId, feature, user.id);
   const tagIds = tags.length > 0 ? await ensureTags(supabase, tags, user.id) : [];
 
   const { data: task, error: taskError } = await supabase
