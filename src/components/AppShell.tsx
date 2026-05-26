@@ -301,11 +301,9 @@ const FilterChip = ({
 export const InputBar = ({
   floating = false,
   view = "today",
-  defaultProjectId = null,
 }: {
   floating?: boolean;
   view?: ViewKey;
-  defaultProjectId?: string | null;
 }) => {
   const formRef = useRef<HTMLFormElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -319,16 +317,12 @@ export const InputBar = ({
     const trimmed = value.trim();
     if (!trimmed) return;
 
-    // 뷰·필터 컨텍스트에서 새 task 가 어디에 속할지 자연스럽게 추론.
-    // 사용자가 "예정" 보는 중에 추가 → 내일, "프로젝트 X" 필터 중 추가 → X 에 속함.
     const dueDate = viewDefaultDueDate(view, new Date());
 
     const fd = new FormData();
-    fd.set("title", trimmed);
+    fd.set("input", trimmed);
     if (dueDate) fd.set("due_date", dueDate);
-    if (defaultProjectId) fd.set("project_id", defaultProjectId);
 
-    // 낙관적으로 input 을 비우되, 실패 시 복원해서 사용자 입력 손실을 막는다.
     setValue("");
     inputRef.current?.focus();
 
@@ -353,10 +347,10 @@ export const InputBar = ({
       <span style={S.inputPlus}>+</span>
       <input
         ref={inputRef}
-        name="title"
+        name="input"
         value={value}
         onChange={(e) => setValue(e.target.value)}
-        placeholder="할 일 추가 — 내용을 적고 Enter, # 으로 프로젝트, @ 로 마감일"
+        placeholder="[프로젝트:기능] #태그 할 일"
         style={S.inputField}
         autoComplete="off"
       />

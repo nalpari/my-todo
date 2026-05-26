@@ -3,11 +3,8 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { createMutableClient } from "@/lib/supabase/server";
+import { parseTaskInput } from "@/lib/data";
 
-/**
- * 세션 검증 후 (supabase, user) 반환. 세션 만료면 /login 으로 redirect.
- * 주의: redirect() 는 NEXT_REDIRECT throw 라서 호출처에서 try/catch 로 감싸면 안 된다.
- */
 async function requireUser() {
   const supabase = await createMutableClient();
   const {
@@ -16,8 +13,6 @@ async function requireUser() {
   if (!user) redirect("/login?error=session_expired");
   return { supabase, user };
 }
-
-/* ─── 입력 검증 유틸 ────────────────────────────────────────── */
 
 const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const HHMM_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
@@ -57,11 +52,6 @@ function parseNullableUuid(raw: unknown): string | null {
   return raw;
 }
 
-/**
- * project_id 가 인증된 사용자 소유인지 사전 검증.
- * DB 의 복합 FK (003 마이그레이션) 가 cross-tenant 참조를 어차피 거부하지만,
- * 명확한 에러 메시지를 위해 앱 레이어에서도 한 번 더 확인한다.
- */
 async function assertOwnedProject(
   supabase: Awaited<ReturnType<typeof createMutableClient>>,
   projectId: string,
@@ -77,27 +67,133 @@ async function assertOwnedProject(
   if (!data) throw new Error("해당 프로젝트를 찾을 수 없습니다");
 }
 
-/* ─── createTask ────────────────────────────────────────────── */
+async function ensureProject(
+  supabase: Awaited<ReturnType<typeof createMutableClient>>,
+  name: string,
+  userId: string,
+): Promise<string> {
+  const { data: existing } = await supabase
+    .from("projects")
+    .select("id")
+    .eq("user_id", userId)
+    .eq("name", name)
+    .maybeSingle();
+
+  if (existing) return existing.id;
+
+  const { data, error } = await supabase
+    .from("projects")
+    .insert({ user_id: userId, name })
+    .select("id")
+    .single();
+
+  if (error) throw new Error(`프로젝트 생성 실패: ${error.message}`);
+  return data.id;
+}
+
+async function ensureFeature(
+  supabase: Awaited<ReturnType<typeof createMutableClient>>,
+  projectId: string,
+  name: string,
+): Promise<string> {
+  const { data: existing } = await supabase
+    .from("features")
+    .select("id")
+    .eq("project_id", projectId)
+    .eq("name", name)
+    .maybeSingle();
+
+  if (existing) return existing.id;
+
+  const { data, error } = await supabase
+    .from("features")
+    .insert({ project_id: projectId, name })
+    .select("id")
+    .single();
+
+  if (error) throw new Error(`기능 생성 실패: ${error.message}`);
+  return data.id;
+}
+
+async function ensureTags(
+  supabase: Awaited<ReturnType<typeof createMutableClient>>,
+  names: string[],
+  userId: string,
+): Promise<string[]> {
+  const ids: string[] = [];
+
+  for (const name of names) {
+    const { data: existing } = await supabase
+      .from("tags")
+      .select("id")
+      .eq("user_id", userId)
+      .eq("name", name)
+      .maybeSingle();
+
+    if (existing) {
+      ids.push(existing.id);
+      continue;
+    }
+
+    const { data, error } = await supabase
+      .from("tags")
+      .insert({ user_id: userId, name })
+      .select("id")
+      .single();
+
+    if (error) throw new Error(`태그 생성 실패: ${error.message}`);
+    ids.push(data.id);
+  }
+
+  return ids;
+}
 
 export async function createTask(formData: FormData) {
-  const title = parseTitle(formData.get("title"));
-  const projectId = parseNullableUuid(formData.get("project_id"));
+  const rawInput = formData.get("input");
+  if (typeof rawInput !== "string" || !rawInput.trim()) {
+    throw new Error("할 일을 입력해 주세요");
+  }
+
+  const parsed = parseTaskInput(rawInput);
+  if (!parsed) {
+    throw new Error("형식: [프로젝트:기능] #태그 할 일");
+  }
+
+  const { project, feature, tags, title } = parsed;
   const dueDate = parseNullableDate(formData.get("due_date"));
   const dueTime = parseNullableTime(formData.get("due_time"));
 
   const { supabase, user } = await requireUser();
 
-  if (projectId) await assertOwnedProject(supabase, projectId, user.id);
+  const projectId = await ensureProject(supabase, project, user.id);
+  const featureId = await ensureFeature(supabase, projectId, feature);
+  const tagIds = tags.length > 0 ? await ensureTags(supabase, tags, user.id) : [];
 
-  const { error } = await supabase.from("tasks").insert({
-    user_id: user.id,
-    title,
-    project_id: projectId,
-    due_date: dueDate,
-    due_time: dueTime,
-  });
+  const { data: task, error: taskError } = await supabase
+    .from("tasks")
+    .insert({
+      user_id: user.id,
+      title,
+      project_id: projectId,
+      feature_id: featureId,
+      due_date: dueDate,
+      due_time: dueTime,
+    })
+    .select("id")
+    .single();
 
-  if (error) throw new Error(`task 생성 실패: ${error.message}`);
+  if (taskError) throw new Error(`task 생성 실패: ${taskError.message}`);
+
+  if (tagIds.length > 0) {
+    const { error: tagError } = await supabase.from("task_tags").insert(
+      tagIds.map((tagId) => ({
+        task_id: task.id,
+        tag_id: tagId,
+      })),
+    );
+
+    if (tagError) throw new Error(`태그 연결 실패: ${tagError.message}`);
+  }
 
   revalidatePath("/");
 }

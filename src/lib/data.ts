@@ -247,3 +247,34 @@ export function rowToSubtask(row: SubtaskRow): Subtask {
     created_at: row.created_at,
   };
 }
+
+export type ParsedTaskInput = {
+  project: string;
+  feature: string;
+  tags: string[];
+  title: string;
+} | null;
+
+export function parseTaskInput(input: string): ParsedTaskInput {
+  const trimmed = input.trim();
+  if (!trimmed) return null;
+
+  const projectFeatureMatch = trimmed.match(/^\[([^\]:]+):([^\]]+)\]\s*/);
+  if (!projectFeatureMatch) return null;
+
+  const project = projectFeatureMatch[1].trim();
+  const feature = projectFeatureMatch[2].trim();
+  const remaining = trimmed.slice(projectFeatureMatch[0].length);
+
+  const tags: string[] = [];
+  const tagRegex = /#(\S+)/g;
+  let tagMatch;
+  while ((tagMatch = tagRegex.exec(remaining)) !== null) {
+    tags.push(tagMatch[1]);
+  }
+
+  const title = remaining.replace(/#\S+\s*/g, "").trim();
+  if (!title) return null;
+
+  return { project, feature, tags, title };
+}
