@@ -46,8 +46,9 @@ export const TaskRow = ({
   showProject?: boolean;
   showTime?: boolean;
 }) => {
-  const { toggleTask, deleteTask, updateTaskTitle, projects } = useApp();
+  const { toggleTask, deleteTask, updateTaskTitle, projects, features } = useApp();
   const project = task.projectId ? projects.find((p) => p.id === task.projectId) : null;
+  const feature = task.featureId ? features.find((f) => f.id === task.featureId) : null;
   const hasSub = task.subtotal > 0;
   const [isEditing, setIsEditing] = useState(false);
   const [editValue, setEditValue] = useState(task.title);
@@ -121,6 +122,12 @@ export const TaskRow = ({
               >
                 <ProjectDot id={task.projectId} size={6} />
                 {project.name}
+                {feature && (
+                  <>
+                    <span aria-hidden="true" style={{ color: "var(--text-faint)" }}>·</span>
+                    <span>{feature.name}</span>
+                  </>
+                )}
               </span>
             )}
           </div>
@@ -278,6 +285,12 @@ export const TaskRow = ({
               <span style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 11.5, color: "var(--text-muted)" }}>
                 <ProjectDot id={task.projectId} size={6} />
                 {project.name}
+                {feature && (
+                  <>
+                    <span aria-hidden="true" style={{ color: "var(--text-faint)" }}>·</span>
+                    <span>{feature.name}</span>
+                  </>
+                )}
               </span>
             )}
             <TaskTagsEditor taskId={task.id} tags={task.tags} active={hovered} />
