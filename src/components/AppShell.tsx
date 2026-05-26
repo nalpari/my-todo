@@ -351,6 +351,7 @@ export const InputBar = ({
         value={value}
         onChange={(e) => setValue(e.target.value)}
         placeholder="[프로젝트:기능] #태그 할 일"
+        title="예시: [디자인:로그인] #urgent 버튼 색상 변경 — [프로젝트:기능] 필수, #태그 선택"
         style={S.inputField}
         autoComplete="off"
       />
