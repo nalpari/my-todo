@@ -97,15 +97,16 @@ Google OAuth 활성화 + 할 일 CRUD 구현 완료.
 
 ## DB 스키마 (CRUD 구현)
 
-DB 마이그레이션 SQL: `supabase/migrations/` (현재 `001_initial_schema.sql`, `002_rls_with_check.sql`, `003_tenant_isolation.sql`, `004_projects_uniqueness.sql`, `005_tags_uniqueness.sql`, `006_subtasks.sql`). 원격 적용은 Supabase MCP `apply_migration` 또는 Dashboard SQL Editor 사용. 002 는 001 의 UPDATE 정책에 `WITH CHECK` 를 추가해 소유권 이전 (`user_id` 변경) 공격을 막고, 003 은 외래키 차원의 cross-tenant 참조를 차단한다 (`tasks(project_id, user_id) → projects(id, user_id)` 복합 FK, `task_tags` 에 `user_id` 추가 후 task·tag 양쪽에 복합 FK, `due_time` HH:MM CHECK 제약). 004/005 는 각각 `projects`/`tags` 에 `(user_id, name) UNIQUE` 제약 — 같은 사용자 내 동명 항목 차단, 위반 시 `23505` → 서버 액션이 "이미 사용 중인 이름입니다" 로 변환. 006 은 `subtasks` 테이블 (복합 FK + RLS) + `recalc_task_subtask_counts` 트리거를 추가해 `tasks.subtotal/subdone` 의 자동 정합성을 DB 레벨에서 보장.
+DB 마이그레이션 SQL: `supabase/migrations/` (현재 `001_initial_schema.sql`, `002_rls_with_check.sql`, `003_tenant_isolation.sql`, `004_projects_uniqueness.sql`, `005_tags_uniqueness.sql`, `006_subtasks.sql`, `007_features.sql`). 원격 적용은 Supabase MCP `apply_migration` 또는 Dashboard SQL Editor 사용. 002 는 001 의 UPDATE 정책에 `WITH CHECK` 를 추가해 소유권 이전 (`user_id` 변경) 공격을 막고, 003 은 외래키 차원의 cross-tenant 참조를 차단한다 (`tasks(project_id, user_id) → projects(id, user_id)` 복합 FK, `task_tags` 에 `user_id` 추가 후 task·tag 양쪽에 복합 FK, `due_time` HH:MM CHECK 제약). 004/005 는 각각 `projects`/`tags` 에 `(user_id, name) UNIQUE` 제약 — 같은 사용자 내 동명 항목 차단, 위반 시 `23505` → 서버 액션이 "이미 사용 중인 이름입니다" 로 변환. 006 은 `subtasks` 테이블 (복합 FK + RLS) + `recalc_task_subtask_counts` 트리거를 추가해 `tasks.subtotal/subdone` 의 자동 정합성을 DB 레벨에서 보장. 007 은 `features` 테이블 (project 의 하위 분류) + `tasks.feature_id` 컬럼을 추가하는데, 003 의 격리 패턴을 그대로 따른다 — `features` 가 `user_id` 직접 보유, `(project_id, user_id) → projects(id, user_id)` 와 `tasks(feature_id, user_id) → features(id, user_id)` 양쪽 복합 FK, UPDATE 정책에 `WITH CHECK` 강제, `(project_id, name) UNIQUE` 로 같은 프로젝트 내 동명 기능 차단.
 
 ### 테이블 구조
 
 | 테이블 | 설명 |
 |--------|------|
 | `public.projects` | 프로젝트 (user_id FK, name, color) |
+| `public.features` | 프로젝트 하위 기능 (user_id FK, project_id FK 복합, name). `(project_id, name) UNIQUE` |
 | `public.tags` | 태그 (user_id FK, name, hue: "accent"\|"muted") |
-| `public.tasks` | 할 일 (user_id FK, project_id FK, title, due_date DATE, due_time TEXT, done, subtotal, subdone, sort_order). subtotal/subdone 은 트리거가 자동 유지 |
+| `public.tasks` | 할 일 (user_id FK, project_id FK, feature_id FK 복합, title, due_date DATE, due_time TEXT, done, subtotal, subdone, sort_order). subtotal/subdone 은 트리거가 자동 유지 |
 | `public.task_tags` | N:M 조인 (task_id, tag_id) |
 | `public.subtasks` | 서브태스크 (task_id FK 복합, user_id FK, title, done, sort_order). ON DELETE CASCADE 로 부모 task 삭제 시 함께 제거 |
 
@@ -120,7 +121,7 @@ DB 마이그레이션 SQL: `supabase/migrations/` (현재 `001_initial_schema.sq
 | `src/lib/palette.ts` | 프로젝트 색 팔레트 (`PROJECT_COLORS` 8색, `DEFAULT_PROJECT_COLOR`, `isProjectColor` 런타임 가드) — Server Action 검증과 사이드바 swatch picker 가 공유 |
 | `src/lib/view.ts` | 사이드바 view 라우팅 + 프로젝트·태그 필터 + 검색의 URL 직렬화·필터·정렬·라벨 헬퍼. `ViewKey`, `parseView`/`parseProjectId`/`parseTagId`, `toggleViewHref`/`toggleProjectHref`/`toggleTagHref` (동일 항목 재클릭 시 키 제거), `filterTasks(tasks, view, projectId, tagId)` (모두 AND), `filterBySearch` (title + project name case-insensitive substring), `sortTasksForView`, `viewTitle`/`viewSubtitleContext`/`viewEmptyMessage` |
 | `src/lib/AppContext.tsx` | Client 컨텍스트. `useOptimistic` reducer 가 task·project·tag·subtask 변이를 통합 관리. cascade 미러: `project.delete` → 소속 task.project=null / `tag.delete` → 모든 task.tags 에서 제거 / `task.delete` → 소속 subtasks 제거 / `subtask.create|toggle|delete` → 부모 task 의 subtotal/subdone 동기 갱신 (DB 트리거 결과 미러) |
-| `src/app/tasks/actions.ts` | Server Actions (createTask, toggleTask, updateTask, deleteTask) + `revalidatePath("/")` |
+| `src/app/tasks/actions.ts` | Server Actions (createTask, toggleTask, updateTask, deleteTask) + `revalidatePath("/")`. `createTask` 는 단일 `input` 필드를 `parseTaskInput` 으로 분해 후 `ensureProject` / `ensureFeature` / `ensureTags` 로 누락된 부속 row 를 user 스코프에서 upsert 후 task insert |
 | `src/app/projects/actions.ts` | Server Actions (createProject, updateProject, deleteProject). 동일 컨벤션 + `parseName` (trim·연속공백→1개·1-50자) + `parseColor` (`isProjectColor` enum 가드) + 23505 캐치 |
 | `src/app/tags/actions.ts` | Server Actions (createTag, deleteTag, assignTag, unassignTag). `parseName` (1-30자, project 보다 짧음) + `parseHue` (accent\|muted enum). assignTag 는 (task_id, tag_id) UNIQUE 위반 시 멱등 처리 (이미 할당된 상태로 간주, 성공 반환) |
 | `src/app/subtasks/actions.ts` | Server Actions (createSubtask, updateSubtask, deleteSubtask). 동일 컨벤션 + `parseTitle` (1-200자). updateSubtask 는 fields 화이트리스트 (title / done 만). subtotal/subdone 의 정합성은 DB 트리거가 담당 — action 코드는 subtasks 만 다룸 |
@@ -164,17 +165,17 @@ URL state: `/?view=today&project=<uuid>&tag=<uuid>`. `view` 기본값은 `today`
 
 사이드바 nav 카운트는 **모든 필터 (프로젝트·태그) 를 무시한 전역 카운트** — 다른 뷰의 전체 task 가 몇 개인지 보여야 의미. "지금 보고 있는 뷰 + 필터 결과 수" 는 TopBar subtitle 이 담당 (`{context} · N tasks`). 활성 필터의 식별은 TopBar 의 인라인 chips (project / tag) 와 search input 자체가 노출 — chip × 한 번으로 해당 차원만 해제.
 
-## InputBar 의 컨텍스트 추론
+## InputBar 의 입력 형식 + 컨텍스트 추론
 
-`<InputBar />` 는 현재 view·activeProjectId 를 받아 새 task 의 기본 due_date 와 project_id 를 prefill:
+`<InputBar />` 는 단일 `input` 필드를 받아 `parseTaskInput` (in `src/lib/data.ts`) 으로 분해한다. 필수 형식: `[프로젝트:기능] #태그 제목` (태그는 0개 이상). 형식 미충족 시 server action 이 `"형식: [프로젝트:기능] #태그 할 일 — 예시: …"` 에러를 throw → 토스트로 노출. placeholder 와 input `title` 속성에 예시를 노출해 안내.
 
+뷰 컨텍스트 기반 `due_date` prefill 은 유지:
 - view=today/done → due_date = 오늘
 - view=upcoming → 내일
 - view=inbox → null
 - view=someday → 오늘 + 8일
-- activeProjectId 있으면 project_id 자동 할당
 
-input 우측의 due 칩 라벨도 뷰별로 변경 (`오늘` / `내일` / `미할당` / `나중에`). 즉 "예정" 뷰에서 task 를 추가하면 자연스럽게 내일로, 프로젝트 X 필터 중 추가하면 X 에 속한다.
+input 우측의 due 칩 라벨도 뷰별로 변경 (`오늘` / `내일` / `미할당` / `나중에`). 프로젝트·태그 차원은 **입력 토큰에서 직접 추출**되므로 `activeProjectId` 기반 자동 할당은 더 이상 수행하지 않는다 — 활성 프로젝트 필터 중에 추가하려면 사용자가 `[프로젝트:기능]` 토큰을 직접 입력. 누락된 프로젝트·기능·태그는 user 스코프에서 upsert 되어 자동 생성된다.
 
 ## 서브태스크 (Subtasks)
 
