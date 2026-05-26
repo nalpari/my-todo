@@ -116,12 +116,12 @@ DB 마이그레이션 SQL: `supabase/migrations/` (현재 `001_initial_schema.sq
 
 | 파일 | 역할 |
 |------|------|
-| `src/lib/data.ts` | 타입 정의 (ProjectRow, TaskRow, Project, Tag, Task, **BucketKey** — `inbox` (due_date null) 와 `later` (today+7 너머) 분리), 날짜 유틸 (toISODate, dateToBucket, buildWeek, buildDayBuckets, rowToTask). Task 에 created_at/updated_at 포함 (TaskList 정렬용) |
-| `src/lib/queries.ts` | RSC 서버에서 DB fetch (getProjects, getTags, getTasks, getSubtasks, getAppData) |
+| `src/lib/data.ts` | 타입 정의 (ProjectRow, TagRow, FeatureRow, TaskRow, SubtaskRow, Project, Tag, **Feature** (id·projectId·name), Task (featureId 포함), Subtask, **BucketKey** — `inbox` (due_date null) 와 `later` (today+7 너머) 분리). 날짜 유틸 (toISODate, dateToBucket, buildWeek, buildDayBuckets, rowToTask). `parseTaskInput` (pure 파서) — `[project]` · `[project:feature]` · prefix 없음 · `#tag` 0개 이상 모두 허용. ParsedTaskInput.project/feature 가 nullable |
+| `src/lib/queries.ts` | RSC 서버에서 DB fetch (getProjects, getTags, getFeatures, getTasks, getSubtasks, getAppData). AppData 에 features 포함 |
 | `src/lib/palette.ts` | 프로젝트 색 팔레트 (`PROJECT_COLORS` 8색, `DEFAULT_PROJECT_COLOR`, `isProjectColor` 런타임 가드) — Server Action 검증과 사이드바 swatch picker 가 공유 |
 | `src/lib/view.ts` | 사이드바 view 라우팅 + 프로젝트·태그 필터 + 검색의 URL 직렬화·필터·정렬·라벨 헬퍼. `ViewKey`, `parseView`/`parseProjectId`/`parseTagId`, `toggleViewHref`/`toggleProjectHref`/`toggleTagHref` (동일 항목 재클릭 시 키 제거), `filterTasks(tasks, view, projectId, tagId)` (모두 AND), `filterBySearch` (title + project name case-insensitive substring), `sortTasksForView`, `viewTitle`/`viewSubtitleContext`/`viewEmptyMessage` |
-| `src/lib/AppContext.tsx` | Client 컨텍스트. `useOptimistic` reducer 가 task·project·tag·subtask 변이를 통합 관리. cascade 미러: `project.delete` → 소속 task.project=null / `tag.delete` → 모든 task.tags 에서 제거 / `task.delete` → 소속 subtasks 제거 / `subtask.create|toggle|delete` → 부모 task 의 subtotal/subdone 동기 갱신 (DB 트리거 결과 미러) |
-| `src/app/tasks/actions.ts` | Server Actions (createTask, toggleTask, updateTask, deleteTask) + `revalidatePath("/")`. `createTask` 는 단일 `input` 필드를 `parseTaskInput` 으로 분해 후 `ensureProject` / `ensureFeature` / `ensureTags` 로 누락된 부속 row 를 user 스코프에서 upsert 후 task insert |
+| `src/lib/AppContext.tsx` | Client 컨텍스트. `useOptimistic` reducer 가 task·project·tag·feature·subtask 변이를 통합 관리. cascade 미러: `project.delete` → 소속 task.projectId=null + 소속 features 제거 + 해당 feature 참조 task.featureId=null / `tag.delete` → 모든 task.tags 에서 제거 / `task.delete` → 소속 subtasks 제거 / `subtask.create|toggle|delete` → 부모 task 의 subtotal/subdone 동기 갱신 (DB 트리거 결과 미러). features 자체에 대한 client 변이 액션은 없음 — createTask 의 ensureFeature 결과는 revalidate 가 반영 |
+| `src/app/tasks/actions.ts` | Server Actions (createTask, toggleTask, updateTask, deleteTask) + `revalidatePath("/")`. `createTask` 는 단일 `input` 필드를 `parseTaskInput` 으로 분해 후 `parseProjectName`/`parseFeatureName`/`parseTagName` 으로 검증, `ensureProject` / `ensureFeature` / `ensureTags` 로 누락된 부속 row 를 user 스코프에서 upsert 후 task insert. ensure* 는 INSERT 23505 race 시 다시 SELECT 로 idempotent. 입력에 `[project]` 가 없으면 `formData.get("project_id")` (InputBar 의 activeProjectId fallback) 사용 |
 | `src/app/projects/actions.ts` | Server Actions (createProject, updateProject, deleteProject). 동일 컨벤션 + `parseName` (trim·연속공백→1개·1-50자) + `parseColor` (`isProjectColor` enum 가드) + 23505 캐치 |
 | `src/app/tags/actions.ts` | Server Actions (createTag, deleteTag, assignTag, unassignTag). `parseName` (1-30자, project 보다 짧음) + `parseHue` (accent\|muted enum). assignTag 는 (task_id, tag_id) UNIQUE 위반 시 멱등 처리 (이미 할당된 상태로 간주, 성공 반환) |
 | `src/app/subtasks/actions.ts` | Server Actions (createSubtask, updateSubtask, deleteSubtask). 동일 컨벤션 + `parseTitle` (1-200자). updateSubtask 는 fields 화이트리스트 (title / done 만). subtotal/subdone 의 정합성은 DB 트리거가 담당 — action 코드는 subtasks 만 다룸 |
@@ -147,8 +147,9 @@ DB 마이그레이션 SQL: `supabase/migrations/` (현재 `001_initial_schema.sq
 
 ### 입력 검증 컨벤션 (tasks Server Action)
 
-- Server Action 은 사실상 public RPC. TS 타입은 런타임 강제력이 없으므로 client 가 임의 키 (`user_id`, `sort_order` 등) 를 보낼 수 있다. `actions.ts` 의 `parseTitle`/`parseNullableDate`/`parseNullableTime`/`parseNullableUuid` 헬퍼가 키 화이트리스트 + 포맷 검증을 담당. `updateTask` 는 `fields: unknown` 으로 받고 명시된 4개 키만 update 객체에 옮긴다.
+- Server Action 은 사실상 public RPC. TS 타입은 런타임 강제력이 없으므로 client 가 임의 키 (`user_id`, `sort_order` 등) 를 보낼 수 있다. `actions.ts` 의 `parseTitle`/`parseNullableDate`/`parseNullableTime`/`parseNullableUuid` 헬퍼가 키 화이트리스트 + 포맷 검증을 담당. `updateTask` 는 `fields: unknown` 으로 받고 명시된 4개 키만 update 객체에 옮긴다. `createTask` 는 추가로 `parseProjectName` (50자) / `parseFeatureName` (50자) / `parseTagName` (30자) 로 parseTaskInput 결과를 normalize (trim + 연속 공백 1개) + 길이 검증 — projects/tags actions 의 `parseName` 과 동일 규칙.
 - 다른 user 소유 row 를 참조할 수 있는 모든 mutate (tasks 의 project_id, subtasks/task_tags 의 task_id) 는 `assertOwnedProject` / `assertOwnedTask` 로 사전 소유권 확인 후 진행. 003 의 복합 FK 가 cross-tenant 참조를 어차피 거부하지만, FK 위반 raw 메시지 대신 명확한 한국어 에러를 노출하기 위함. FK 위반 (23503) 은 `translateDbError` 가 "참조 대상을 찾을 수 없습니다" 로 변환.
+- `ensureProject` / `ensureFeature` / `ensureTags` 는 SELECT-then-INSERT 의 race window 를 23505 catch + re-SELECT 로 보완 — 동시 요청 두 개가 같은 이름을 만들어도 raw "duplicate key" 가 사용자에게 노출되지 않는다. task_tags insert 는 003 이 `user_id NOT NULL` 을 요구하므로 반드시 `user_id: user.id` 를 포함.
 
 ## 사이드바 view 라우팅 + 프로젝트·태그 필터
 
@@ -167,15 +168,17 @@ URL state: `/?view=today&project=<uuid>&tag=<uuid>`. `view` 기본값은 `today`
 
 ## InputBar 의 입력 형식 + 컨텍스트 추론
 
-`<InputBar />` 는 단일 `input` 필드를 받아 `parseTaskInput` (in `src/lib/data.ts`) 으로 분해한다. 필수 형식: `[프로젝트:기능] #태그 제목` (태그는 0개 이상). 형식 미충족 시 server action 이 `"형식: [프로젝트:기능] #태그 할 일 — 예시: …"` 에러를 throw → 토스트로 노출. placeholder 와 input `title` 속성에 예시를 노출해 안내.
+`<InputBar />` 는 단일 `input` 필드를 받아 `parseTaskInput` (in `src/lib/data.ts`) 으로 분해한다. 모든 토큰이 **옵셔널** — `할 일` 만 입력하거나 `[프로젝트] 할 일`, `[프로젝트:기능] #태그 할 일` 등 어떤 조합이든 허용. 빈 본문만 거부한다. `#태그` 는 어디서나 0개 이상.
 
-뷰 컨텍스트 기반 `due_date` prefill 은 유지:
+뷰 컨텍스트 기반 `due_date` prefill:
 - view=today/done → due_date = 오늘
 - view=upcoming → 내일
 - view=inbox → null
 - view=someday → 오늘 + 8일
 
-input 우측의 due 칩 라벨도 뷰별로 변경 (`오늘` / `내일` / `미할당` / `나중에`). 프로젝트·태그 차원은 **입력 토큰에서 직접 추출**되므로 `activeProjectId` 기반 자동 할당은 더 이상 수행하지 않는다 — 활성 프로젝트 필터 중에 추가하려면 사용자가 `[프로젝트:기능]` 토큰을 직접 입력. 누락된 프로젝트·기능·태그는 user 스코프에서 upsert 되어 자동 생성된다.
+input 우측의 due 칩 라벨도 뷰별로 변경 (`오늘` / `내일` / `미할당` / `나중에`).
+
+프로젝트는 (1) 입력의 `[project]` 토큰이 우선, (2) 없으면 InputBar 의 `defaultProjectId` prop (VariantBSplit 이 `activeProjectId` 를 전달) 이 fallback, (3) 둘 다 없으면 미할당. fallback projectId 는 `assertOwnedProject` 로 사전 검증 — 다른 사용자 row 참조 차단. feature 는 입력 토큰에서만 추출 (fallback 개념 없음) 되며 project 와 짝일 때만 ensure. 누락된 프로젝트·기능·태그는 user 스코프에서 idempotent upsert 로 자동 생성된다.
 
 ## 서브태스크 (Subtasks)
 
