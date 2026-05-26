@@ -99,7 +99,6 @@ export const TaskRow = ({
           border: `1px solid ${focused ? "var(--border-accent)" : "var(--border)"}`,
           background: focused ? "rgba(217,119,87,0.04)" : "var(--bg-surface)",
           transition: "border-color .2s",
-          position: "relative",
         }}
         onMouseEnter={() => setHovered(true)}
         onMouseLeave={() => setHovered(false)}
@@ -171,16 +170,14 @@ export const TaskRow = ({
           </div>
           {expanded && <SubtaskList taskId={task.id} />}
         </div>
-        {hovered && (
-          <button
-            onClick={() => deleteTask(task.id)}
-            style={deleteBtn}
-            aria-label="삭제"
-            type="button"
-          >
-            ×
-          </button>
-        )}
+        <button
+          onClick={() => deleteTask(task.id)}
+          style={deleteBtn}
+          aria-label="삭제"
+          type="button"
+        >
+          ×
+        </button>
       </div>
     );
   }
@@ -188,7 +185,7 @@ export const TaskRow = ({
   if (style === "minimal") {
     return (
       <div
-        style={{ display: "flex", alignItems: "center", gap: 12, padding: "8px 4px", borderRadius: 4, position: "relative" }}
+        style={{ display: "flex", alignItems: "center", gap: 12, padding: "8px 4px", borderRadius: 4 }}
         onMouseEnter={() => setHovered(true)}
         onMouseLeave={() => setHovered(false)}
       >
@@ -210,9 +207,7 @@ export const TaskRow = ({
             {task.due_time}
           </span>
         )}
-        {hovered && (
-          <button onClick={() => deleteTask(task.id)} style={deleteBtn} aria-label="삭제" type="button">×</button>
-        )}
+        <button onClick={() => deleteTask(task.id)} style={deleteBtn} aria-label="삭제" type="button">×</button>
       </div>
     );
   }
@@ -303,28 +298,69 @@ export const TaskRow = ({
 
       <span
         style={{
-          fontFamily: "var(--font-display)", fontStyle: "italic",
-          fontVariationSettings: '"opsz" 14, "wght" 400',
-          fontSize: 13, color: hovered ? "var(--accent)" : "var(--text-faint)",
-          cursor: hovered ? "pointer" : "default",
-          transition: "color .15s",
+          display: "flex",
+          alignItems: "center",
+          gap: 8,
         }}
-        onClick={hovered ? () => deleteTask(task.id) : undefined}
-        title={hovered ? "삭제" : undefined}
       >
-        {hovered ? "×" : `№ ${String(task.id).slice(-4)}`}
+        <button
+          onClick={() => deleteTask(task.id)}
+          style={inlineDeleteBtn}
+          aria-label="삭제"
+          type="button"
+        >
+          ×
+        </button>
+        {!hovered && (
+          <span
+            style={{
+              fontFamily: "var(--font-display)",
+              fontStyle: "italic",
+              fontVariationSettings: '"opsz" 14, "wght" 400',
+              fontSize: 13,
+              color: "var(--text-faint)",
+            }}
+          >
+            {`№ ${String(task.id).slice(-4)}`}
+          </span>
+        )}
       </span>
     </div>
   );
 };
 
+const inlineDeleteBtn: CSSProperties = {
+  width: 18,
+  height: 18,
+  borderRadius: 4,
+  background: "rgba(217,119,87,0.12)",
+  border: "1px solid var(--border-accent)",
+  color: "var(--accent-bright)",
+  fontSize: 12,
+  lineHeight: 1,
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "center",
+  cursor: "pointer",
+  padding: 0,
+  flexShrink: 0,
+};
+
 const deleteBtn: CSSProperties = {
-  position: "absolute", right: 8, top: "50%", transform: "translateY(-50%)",
-  width: 20, height: 20, borderRadius: 4,
-  background: "rgba(217,119,87,0.12)", border: "1px solid var(--border-accent)",
-  color: "var(--accent-bright)", fontSize: 14, lineHeight: 1,
-  display: "flex", alignItems: "center", justifyContent: "center",
-  cursor: "pointer", padding: 0,
+  width: 18,
+  height: 18,
+  borderRadius: 4,
+  background: "rgba(217,119,87,0.12)",
+  border: "1px solid var(--border-accent)",
+  color: "var(--accent-bright)",
+  fontSize: 12,
+  lineHeight: 1,
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "center",
+  cursor: "pointer",
+  padding: 0,
+  flexShrink: 0,
 };
 
 /**
