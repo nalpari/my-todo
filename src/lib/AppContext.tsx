@@ -2,7 +2,7 @@
 
 import { createContext, useContext, useOptimistic, useState, startTransition, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
-import { type Project, type Subtask, type Tag, type Task } from "@/lib/data";
+import { type Feature, type Project, type Subtask, type Tag, type Task } from "@/lib/data";
 import { type AppData } from "@/lib/queries";
 import { toggleTask as toggleTaskAction, deleteTask as deleteTaskAction, updateTask as updateTaskAction } from "@/app/tasks/actions";
 import { createProject as createProjectAction, updateProject as updateProjectAction, deleteProject as deleteProjectAction } from "@/app/projects/actions";
@@ -20,6 +20,7 @@ type TagHue = "accent" | "muted";
 type AppContextValue = {
   projects: Project[];
   tags: Tag[];
+  features: Feature[];
   tasks: Task[];
   subtasks: Subtask[];
   /** currentDone: 서버에 보낼 새 done 값 계산용 (낙관 reducer 는 자체 toggle) */
@@ -53,7 +54,7 @@ const AppContext = createContext<AppContextValue | null>(null);
 
 /* ─── 낙관 reducer 의 통합 state 와 액션 타입 ──────────────── */
 
-type OptimisticState = { projects: Project[]; tags: Tag[]; tasks: Task[]; subtasks: Subtask[] };
+type OptimisticState = { projects: Project[]; tags: Tag[]; features: Feature[]; tasks: Task[]; subtasks: Subtask[] };
 
 type OptimisticAction =
   | { type: "task.toggle"; id: string }
@@ -101,15 +102,26 @@ function reducer(state: OptimisticState, action: OptimisticAction): OptimisticSt
             : p,
         ),
       };
-    case "project.delete":
-      // cascade: 이 프로젝트에 속한 task 들의 projectId 필드도 null 로.
-      // DB 의 ON DELETE SET NULL 과 동일한 결과를 클라이언트에 미리 반영해
-      // revalidate 전 0.1-0.3s 동안 lookup miss 가 깜박이지 않게 한다.
+    case "project.delete": {
+      // cascade:
+      //   - 이 프로젝트에 속한 task 들의 projectId → null (DB: tasks.project_id ON DELETE SET NULL).
+      //   - 이 프로젝트 소속 features → 삭제 (DB: features.project_id ON DELETE CASCADE).
+      //   - 그 feature 들을 참조하던 task.featureId → null (DB: tasks.feature_id ON DELETE SET NULL).
+      const orphanedFeatureIds = new Set(
+        state.features.filter((f) => f.projectId === action.id).map((f) => f.id),
+      );
       return {
         ...state,
         projects: state.projects.filter((p) => p.id !== action.id),
-        tasks: state.tasks.map((t) => (t.projectId === action.id ? { ...t, projectId: null } : t)),
+        features: state.features.filter((f) => f.projectId !== action.id),
+        tasks: state.tasks.map((t) => {
+          const next = { ...t };
+          if (t.projectId === action.id) next.projectId = null;
+          if (t.featureId && orphanedFeatureIds.has(t.featureId)) next.featureId = null;
+          return next;
+        }),
       };
+    }
     case "tag.create":
       return { ...state, tags: [...state.tags, action.tag] };
     case "tag.delete":
@@ -192,7 +204,7 @@ export function AppProvider({ appData, children }: { appData: AppData; children:
   const [error, setError] = useState<AppError | null>(null);
 
   const [optimistic, applyOptimistic] = useOptimistic(
-    { projects: appData.projects, tags: appData.tags, tasks: appData.tasks, subtasks: appData.subtasks },
+    { projects: appData.projects, tags: appData.tags, features: appData.features, tasks: appData.tasks, subtasks: appData.subtasks },
     reducer,
   );
 
@@ -327,6 +339,7 @@ export function AppProvider({ appData, children }: { appData: AppData; children:
       value={{
         projects: optimistic.projects,
         tags: optimistic.tags,
+        features: optimistic.features,
         tasks: optimistic.tasks,
         subtasks: optimistic.subtasks,
         toggleTask,

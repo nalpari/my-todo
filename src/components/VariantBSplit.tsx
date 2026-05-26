@@ -445,8 +445,9 @@ const NowLine = ({ timeStr }: { timeStr: string }) => (
 );
 
 const TimelineCard = ({ task }: { task: Task }) => {
-  const { projects, toggleTask, deleteTask, updateTaskTitle } = useApp();
+  const { projects, features, toggleTask, deleteTask, updateTaskTitle } = useApp();
   const project = task.projectId ? projects.find((p) => p.id === task.projectId) : null;
+  const feature = task.featureId ? features.find((f) => f.id === task.featureId) : null;
   const [hovered, setHovered] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
   const [editValue, setEditValue] = useState(task.title);
@@ -485,6 +486,12 @@ const TimelineCard = ({ task }: { task: Task }) => {
         <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 3, flexWrap: "wrap" }}>
           <span style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--text-muted)", letterSpacing: 0.5 }}>
             {project?.name}
+            {feature && (
+              <>
+                <span aria-hidden="true" style={{ margin: "0 4px", color: "var(--text-faint)" }}>·</span>
+                {feature.name}
+              </>
+            )}
           </span>
           <TaskTagsEditor taskId={task.id} tags={task.tags} active={hovered} />
         </div>

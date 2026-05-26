@@ -21,10 +21,19 @@ export type TagRow = {
   created_at: string;
 };
 
+export type FeatureRow = {
+  id: string;
+  user_id: string;
+  project_id: string;
+  name: string;
+  created_at: string;
+};
+
 export type TaskRow = {
   id: string;
   user_id: string;
   project_id: string | null;
+  feature_id: string | null;
   title: string;
   due_date: string | null;   // ISO date "YYYY-MM-DD"
   due_time: string | null;   // "HH:MM"
@@ -63,6 +72,13 @@ export type Tag = {
   hue: "accent" | "muted";
 };
 
+/** project 의 하위 분류. UI 에선 task 의 메타데이터 줄에 "프로젝트 · 기능" 형태로 표시. */
+export type Feature = {
+  id: string;
+  projectId: string;
+  name: string;
+};
+
 /** UI 표시용 서브태스크. task 와 분리된 별도 array 로 흐름 — taskId 로 룩업. */
 export type Subtask = {
   id: string;
@@ -99,6 +115,7 @@ export type Task = {
   id: string;           // DB uuid
   title: string;
   projectId: string | null; // DB 의 project_id 를 1:1 미러 — 이름만 카멜케이스로
+  featureId: string | null; // DB 의 feature_id 미러 — feature 룩업은 컴포넌트에서.
   /**
    * task_tags 조인 결과를 인라인 Tag 객체로 들고 온다. TagChip 렌더 시 매번
    * tags.find() 룩업을 안 해도 되므로 N*M 비용을 N 으로 줄이고 (rowToTask 단계
@@ -214,6 +231,7 @@ export function rowToTask(row: TaskRow, tags: Tag[], today: Date): Task {
     id: row.id,
     title: row.title,
     projectId: row.project_id,
+    featureId: row.feature_id,
     tags,
     due_date: row.due_date,
     due_time: row.due_time,

@@ -5,6 +5,8 @@
 
 import { createClient } from "@/lib/supabase/server";
 import {
+  type Feature,
+  type FeatureRow,
   type Project,
   type Tag,
   type Task,
@@ -54,6 +56,27 @@ export async function getTags(): Promise<Tag[]> {
   }
 
   return data as Tag[];
+}
+
+/* ─── Features ──────────────────────────────────────────────── */
+
+export async function getFeatures(): Promise<Feature[]> {
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from("features")
+    .select("id, project_id, name")
+    .order("created_at");
+
+  if (error) {
+    console.error("[getFeatures]", error.message);
+    return [];
+  }
+
+  return (data as Pick<FeatureRow, "id" | "project_id" | "name">[]).map((f) => ({
+    id: f.id,
+    projectId: f.project_id,
+    name: f.name,
+  }));
 }
 
 /* ─── Tasks ─────────────────────────────────────────────────── */
@@ -146,6 +169,7 @@ export async function getSubtasks(): Promise<Subtask[]> {
 export type AppData = {
   projects: Project[];
   tags: Tag[];
+  features: Feature[];
   tasks: Task[];
   subtasks: Subtask[];
 };
@@ -153,10 +177,11 @@ export type AppData = {
 export async function getAppData(): Promise<AppData> {
   const today = new Date();
   // tasks 는 tag 객체를 인라인으로 들고 오므로 tags 를 먼저 fetch 한 뒤 주입.
-  // projects/subtasks 와는 병렬 가능.
-  const [projects, tags, subtasks] = await Promise.all([
+  // projects/features/subtasks 와는 병렬 가능.
+  const [projects, tags, features, subtasks] = await Promise.all([
     getProjects(),
     getTags(),
+    getFeatures(),
     getSubtasks(),
   ]);
   const tasks = await getTasks(today, tags);
@@ -173,5 +198,5 @@ export async function getAppData(): Promise<AppData> {
     count: countMap.get(p.id) ?? 0,
   }));
 
-  return { projects: projectsWithCount, tags, tasks, subtasks };
+  return { projects: projectsWithCount, tags, features, tasks, subtasks };
 }
