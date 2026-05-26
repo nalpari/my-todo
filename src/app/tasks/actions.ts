@@ -193,6 +193,7 @@ export async function createTask(formData: FormData) {
       tagIds.map((tagId) => ({
         task_id: task.id,
         tag_id: tagId,
+        user_id: user.id,
       })),
     );
 
