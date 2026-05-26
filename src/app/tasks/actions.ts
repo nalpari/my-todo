@@ -19,6 +19,41 @@ const HHMM_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 const MAX_TITLE_LEN = 500;
+const MAX_PROJECT_NAME_LEN = 50;
+const MAX_FEATURE_NAME_LEN = 50;
+const MAX_TAG_NAME_LEN = 30;
+
+/** trim + 연속 공백 1개로 정규화. projects/tags actions 의 parseName 과 동일 규칙. */
+function normalizeName(raw: string): string {
+  return raw.trim().replace(/\s+/g, " ");
+}
+
+function parseProjectName(raw: string): string {
+  const n = normalizeName(raw);
+  if (!n) throw new Error("프로젝트 이름을 입력해 주세요");
+  if (n.length > MAX_PROJECT_NAME_LEN) {
+    throw new Error(`프로젝트 이름은 ${MAX_PROJECT_NAME_LEN}자 이내`);
+  }
+  return n;
+}
+
+function parseFeatureName(raw: string): string {
+  const n = normalizeName(raw);
+  if (!n) throw new Error("기능 이름을 입력해 주세요");
+  if (n.length > MAX_FEATURE_NAME_LEN) {
+    throw new Error(`기능 이름은 ${MAX_FEATURE_NAME_LEN}자 이내`);
+  }
+  return n;
+}
+
+function parseTagName(raw: string): string {
+  const n = normalizeName(raw);
+  if (!n) throw new Error("태그 이름을 입력해 주세요");
+  if (n.length > MAX_TAG_NAME_LEN) {
+    throw new Error(`태그 이름은 ${MAX_TAG_NAME_LEN}자 이내`);
+  }
+  return n;
+}
 
 function parseTitle(raw: unknown): string {
   if (typeof raw !== "string") throw new Error("제목 형식 오류");
@@ -219,15 +254,18 @@ export async function createTask(formData: FormData) {
     );
   }
 
-  const { project, feature, tags, title } = parsed;
+  const projectName = parseProjectName(parsed.project);
+  const featureName = parseFeatureName(parsed.feature);
+  const tagNames = parsed.tags.map(parseTagName);
+  const title = parseTitle(parsed.title);
   const dueDate = parseNullableDate(formData.get("due_date"));
   const dueTime = parseNullableTime(formData.get("due_time"));
 
   const { supabase, user } = await requireUser();
 
-  const projectId = await ensureProject(supabase, project, user.id);
-  const featureId = await ensureFeature(supabase, projectId, feature, user.id);
-  const tagIds = tags.length > 0 ? await ensureTags(supabase, tags, user.id) : [];
+  const projectId = await ensureProject(supabase, projectName, user.id);
+  const featureId = await ensureFeature(supabase, projectId, featureName, user.id);
+  const tagIds = tagNames.length > 0 ? await ensureTags(supabase, tagNames, user.id) : [];
 
   const { data: task, error: taskError } = await supabase
     .from("tasks")
