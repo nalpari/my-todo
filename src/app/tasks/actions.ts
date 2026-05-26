@@ -249,22 +249,37 @@ export async function createTask(formData: FormData) {
 
   const parsed = parseTaskInput(rawInput);
   if (!parsed) {
-    throw new Error(
-      "형식: [프로젝트:기능] #태그 할 일 — 예시: [디자인:로그인] #urgent 버튼 색상 변경",
-    );
+    throw new Error("할 일을 입력해 주세요");
   }
 
-  const projectName = parseProjectName(parsed.project);
-  const featureName = parseFeatureName(parsed.feature);
-  const tagNames = parsed.tags.map(parseTagName);
   const title = parseTitle(parsed.title);
+  const tagNames = parsed.tags.map(parseTagName);
   const dueDate = parseNullableDate(formData.get("due_date"));
   const dueTime = parseNullableTime(formData.get("due_time"));
+  // 입력에 `[project]` 토큰이 없을 때 InputBar 가 활성 프로젝트 필터를
+  // fallback 으로 전달 — 기존 quick-add 경험을 유지.
+  const fallbackProjectId = parseNullableUuid(formData.get("project_id"));
 
   const { supabase, user } = await requireUser();
 
-  const projectId = await ensureProject(supabase, projectName, user.id);
-  const featureId = await ensureFeature(supabase, projectId, featureName, user.id);
+  // projectId 결정: 입력 토큰 > fallback > null.
+  let projectId: string | null = null;
+  if (parsed.project) {
+    const projectName = parseProjectName(parsed.project);
+    projectId = await ensureProject(supabase, projectName, user.id);
+  } else if (fallbackProjectId) {
+    await assertOwnedProject(supabase, fallbackProjectId, user.id);
+    projectId = fallbackProjectId;
+  }
+
+  // featureId 는 project 와 짝일 때만. parsed.feature 는 regex 상 parsed.project
+  // 없이 단독으로 올 수 없음 — 안전한 가드라기보다 명시적 의도 표현.
+  let featureId: string | null = null;
+  if (projectId && parsed.feature) {
+    const featureName = parseFeatureName(parsed.feature);
+    featureId = await ensureFeature(supabase, projectId, featureName, user.id);
+  }
+
   const tagIds = tagNames.length > 0 ? await ensureTags(supabase, tagNames, user.id) : [];
 
   const { data: task, error: taskError } = await supabase

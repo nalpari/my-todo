@@ -198,7 +198,7 @@ const VariantBSplitInner = ({ user }: { user: DisplayUser }) => {
               <div style={{ height: 100 }} />
             </div>
 
-            <InputBar floating view={view} />
+            <InputBar floating view={view} defaultProjectId={activeProjectId} />
           </div>
 
           {/* RIGHT RAIL — 뷰와 무관하게 일관 (Q4-f) */}

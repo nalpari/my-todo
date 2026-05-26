@@ -301,9 +301,12 @@ const FilterChip = ({
 export const InputBar = ({
   floating = false,
   view = "today",
+  defaultProjectId = null,
 }: {
   floating?: boolean;
   view?: ViewKey;
+  /** 활성 프로젝트 필터. 입력에 `[project]` 토큰이 없을 때만 사용. */
+  defaultProjectId?: string | null;
 }) => {
   const formRef = useRef<HTMLFormElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -322,6 +325,7 @@ export const InputBar = ({
     const fd = new FormData();
     fd.set("input", trimmed);
     if (dueDate) fd.set("due_date", dueDate);
+    if (defaultProjectId) fd.set("project_id", defaultProjectId);
 
     setValue("");
     inputRef.current?.focus();
@@ -350,8 +354,8 @@ export const InputBar = ({
         name="input"
         value={value}
         onChange={(e) => setValue(e.target.value)}
-        placeholder="[프로젝트:기능] #태그 할 일"
-        title="예시: [디자인:로그인] #urgent 버튼 색상 변경 — [프로젝트:기능] 필수, #태그 선택"
+        placeholder="할 일 — 선택: [프로젝트:기능] #태그"
+        title="할 일만 입력해도 OK. [프로젝트] · [프로젝트:기능] · #태그 모두 선택. 예: [디자인:로그인] #urgent 버튼 색상 변경"
         style={S.inputField}
         autoComplete="off"
       />

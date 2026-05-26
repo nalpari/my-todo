@@ -267,22 +267,38 @@ export function rowToSubtask(row: SubtaskRow): Subtask {
 }
 
 export type ParsedTaskInput = {
-  project: string;
-  feature: string;
+  project: string | null;
+  feature: string | null;
   tags: string[];
   title: string;
 } | null;
 
+/**
+ * `[프로젝트:기능] #태그 할 일` 의 모든 토큰을 옵셔널로 파싱.
+ *
+ *  - `[project]` 만, `[project:feature]`, prefix 없음 모두 허용.
+ *  - `#tag` 는 본문 어디서나 0개 이상.
+ *  - feature 는 project 없이 단독으로 올 수 없음 (regex 가 `[ ]` 안에 강제).
+ *
+ * 빈 title 만 null 반환 — 그 외엔 누락된 토큰은 null/[] 로 채운다.
+ */
 export function parseTaskInput(input: string): ParsedTaskInput {
   const trimmed = input.trim();
   if (!trimmed) return null;
 
-  const projectFeatureMatch = trimmed.match(/^\[([^\]:]+):([^\]]+)\]\s*/);
-  if (!projectFeatureMatch) return null;
+  // `[project]` 또는 `[project:feature]` 옵셔널. project/feature 그룹은 `:` 와
+  // `]` 를 모두 제외 — `[a:b:c]` 같은 모호한 입력은 매치 실패 → prefix 없음으로
+  // 처리 (원문 그대로 title 에 남김).
+  const prefixMatch = trimmed.match(/^\[([^\]:]+)(?::([^\]:]+))?\]\s*/);
+  let project: string | null = null;
+  let feature: string | null = null;
+  let remaining = trimmed;
 
-  const project = projectFeatureMatch[1].trim();
-  const feature = projectFeatureMatch[2].trim();
-  const remaining = trimmed.slice(projectFeatureMatch[0].length);
+  if (prefixMatch) {
+    project = prefixMatch[1].trim();
+    feature = prefixMatch[2]?.trim() ?? null;
+    remaining = trimmed.slice(prefixMatch[0].length);
+  }
 
   const tags: string[] = [];
   const tagRegex = /#(\S+)/g;
