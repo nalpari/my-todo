@@ -39,6 +39,68 @@ export const Checkbox = ({
   );
 };
 
+/* ─── Switch (iOS-style toggle) ──────────────────────────
+ * Checkbox 와 동일한 "완료/미완료" 토글(done/onClick)이지만 iOS pill 모양.
+ * TimelineCard 의 title 줄 인라인 토글용 — 우측 상단은 삭제 버튼이 점유하므로
+ * 토글은 제목 옆에 둔다. 좁은 인라인 폭에선 "트랙+핸들" pill 메타포가
+ * 체크박스보다 자연스럽다.
+ */
+export const Switch = ({
+  done,
+  size = 16,
+  onClick,
+}: {
+  done?: boolean;
+  size?: number;
+  onClick?: () => void;
+}) => {
+  // 트랙 height = size, width 는 1.75배 pill 비율 고정 (기본 16 → 28).
+  // 단일 size 만 받아 width↔height 가 어긋난 깨진 비율을 구조적으로 차단.
+  const height = size;
+  const width = Math.round(size * 1.75);
+  const pad = 2;
+  const handleSize = height - pad * 2;
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={!!done}
+      aria-label="완료 토글"
+      onClick={(e) => {
+        e.stopPropagation();
+        onClick?.();
+      }}
+      style={{
+        width,
+        height,
+        borderRadius: height / 2,
+        border: `1px solid ${done ? "var(--accent)" : "var(--border-strong)"}`,
+        background: done ? "var(--accent)" : "transparent",
+        padding: 0,
+        position: "relative",
+        cursor: "pointer",
+        flexShrink: 0,
+        transition: "background .15s, border-color .15s",
+      }}
+    >
+      <span
+        aria-hidden="true"
+        style={{
+          position: "absolute",
+          // -1: 1px 트랙 border 안쪽으로 핸들을 시각 보정 (기본 16px 트랙 기준).
+          top: pad - 1,
+          left: done ? width - handleSize - pad - 1 : pad - 1,
+          width: handleSize,
+          height: handleSize,
+          borderRadius: "50%",
+          background: done ? "#fff" : "var(--text-muted)",
+          transition: "left .15s, background .15s",
+        }}
+      />
+    </button>
+  );
+};
+
 /* ─── Small atoms ────────────────────────────────────────── */
 export const ProjectDot = ({ id, size = 7 }: { id: string | null; size?: number }) => {
   const { projects } = useApp();

@@ -3,7 +3,7 @@
 import type { CSSProperties } from "react";
 import { useState, useEffect, useRef } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Checkbox, MonoLabel, ProjectDot } from "./Primitives";
+import { MonoLabel, ProjectDot, Switch } from "./Primitives";
 import { AppSidebar, AppTopBar, InputBar, type DisplayUser } from "./AppShell";
 import { MiniCalendar, SubtaskMeter } from "./TaskRow";
 import { TaskList, EmptyState } from "./TaskList";
@@ -508,11 +508,14 @@ const TimelineCard = ({ task }: { task: Task }) => {
             style={{ fontSize: 13.5, fontWeight: 500, letterSpacing: -0.1, lineHeight: 1.35, background: "transparent", border: "none", outline: "none", color: "var(--text-display)", fontFamily: "var(--font-body)", width: "100%" }}
           />
         ) : (
-          <div
-            onClick={() => setIsEditing(true)}
-            style={{ fontSize: 13.5, fontWeight: 500, color: "var(--text-display)", letterSpacing: -0.1, lineHeight: 1.35 }}
-          >
-            {task.title}
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <div
+              onClick={() => setIsEditing(true)}
+              style={{ flex: 1, minWidth: 0, fontSize: 13.5, fontWeight: 500, color: "var(--text-display)", letterSpacing: -0.1, lineHeight: 1.35 }}
+            >
+              {task.title}
+            </div>
+            <Switch done={task.done} onClick={() => toggleTask(task.id, task.done)} />
           </div>
         )}
         {task.subtotal > 0 && (
@@ -527,7 +530,6 @@ const TimelineCard = ({ task }: { task: Task }) => {
         )}
         {expanded && <SubtaskList taskId={task.id} />}
       </div>
-      <Checkbox done={task.done} size={16} onClick={() => toggleTask(task.id, task.done)} />
       {hovered && (
         <button
           onClick={(e) => { e.stopPropagation(); deleteTask(task.id); }}
