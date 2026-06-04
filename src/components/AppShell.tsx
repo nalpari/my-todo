@@ -2,15 +2,17 @@
 
 import type { CSSProperties } from "react";
 import { useFormStatus } from "react-dom";
-import { useRef, useState, useTransition } from "react";
+import { useMemo, useRef, useState, useTransition } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { signOut } from "@/app/auth/actions";
 import { createTask } from "@/app/tasks/actions";
-import { KeyHint, MonoLabel } from "./Primitives";
+import { KeyHint, MonoLabel, TagChip } from "./Primitives";
+import { InputTagPicker } from "./InputTagPicker";
 import { ProjectList } from "./ProjectList";
+import { ProjectPicker } from "./ProjectPicker";
 import { TagList } from "./TagList";
 import { useApp } from "@/lib/AppContext";
-import { toISODate } from "@/lib/data";
+import { toISODate, type Tag } from "@/lib/data";
 import { parseView, toggleViewHref, type ViewKey } from "@/lib/view";
 
 /**
@@ -311,9 +313,54 @@ export const InputBar = ({
   const formRef = useRef<HTMLFormElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const [value, setValue] = useState("");
+  /** 픽커로 명시적으로 선택한 태그. 인풋의 `#tag` 와 독립 — 제출 시 FormData
+   * `tag_ids` 필드로 합류, 서버에서 `#tag` 파싱 결과와 union + dedupe. */
+  const [pickedTags, setPickedTags] = useState<Tag[]>([]);
   const [, startTransition] = useTransition();
-  const { reportError } = useApp();
+  const { tags, reportError } = useApp();
   const router = useRouter();
+
+  // 인풋에서 `#태그이름` 토큰 추출. parseTaskInput 과 동일 regex — 시각적
+  // 디스플레이가 서버가 받을 예정과 일치하도록.
+  const inlineTagNames = useMemo(() => {
+    const names: string[] = [];
+    const re = /#(\S+)/g;
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(value)) !== null) names.push(m[1]);
+    return names;
+  }, [value]);
+
+  // pending = pickedTags ∪ (인풋 파싱 결과를 tags 에서 lookup). id 기준 dedupe.
+  // pickedTags 가 먼저 와서 픽커 우선순위 유지 — 인풋에 같은 이름이 있어도
+  // 동일 객체가 표시되므로 flicker 없음.
+  const pendingTags = useMemo(() => {
+    const seen = new Set<string>();
+    const result: Tag[] = [];
+    for (const t of pickedTags) {
+      if (!seen.has(t.id)) {
+        seen.add(t.id);
+        result.push(t);
+      }
+    }
+    for (const name of inlineTagNames) {
+      const t = tags.find((tag) => tag.name === name);
+      if (t && !seen.has(t.id)) {
+        seen.add(t.id);
+        result.push(t);
+      }
+    }
+    return result;
+  }, [pickedTags, inlineTagNames, tags]);
+
+  /** 디스플레이 chip 의 × — pickedTags 에서 제거 + 인풋 텍스트에서 `#tag` 도
+   * strip. 이름의 regex 특수문자 escape + 단어경계로 "urgent" 가 "urgently" 를
+   * 삼키지 않게. */
+  const removePending = (tag: Tag) => {
+    setPickedTags((prev) => prev.filter((t) => t.id !== tag.id));
+    const escaped = tag.name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const re = new RegExp(`#${escaped}(?=\\s|$)`, "g");
+    setValue((v) => v.replace(re, "").replace(/\s+/g, " ").trim());
+  };
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -322,12 +369,20 @@ export const InputBar = ({
 
     const dueDate = viewDefaultDueDate(view, new Date());
 
+    // 제출 시점의 픽커 태그를 스냅샷 — 실패 catch 에서 텍스트와 함께 복원해
+    // 재시도 시 태그 연결이 유실되지 않게 한다 (setValue(trimmed) 와 대칭).
+    const snapshotTags = pickedTags;
+
     const fd = new FormData();
     fd.set("input", trimmed);
     if (dueDate) fd.set("due_date", dueDate);
     if (defaultProjectId) fd.set("project_id", defaultProjectId);
+    if (snapshotTags.length > 0) {
+      fd.set("tag_ids", snapshotTags.map((t) => t.id).join(","));
+    }
 
     setValue("");
+    setPickedTags([]);
     inputRef.current?.focus();
 
     startTransition(async () => {
@@ -337,6 +392,7 @@ export const InputBar = ({
         const msg = err instanceof Error ? err.message : "task 생성 실패";
         reportError(msg);
         setValue(trimmed);
+        setPickedTags(snapshotTags);
         router.refresh();
       }
     });
@@ -346,25 +402,51 @@ export const InputBar = ({
     <form
       ref={formRef}
       onSubmit={handleSubmit}
-      style={{ ...S.inputBar, ...(floating ? S.inputBarFloating : {}) }}
+      style={{
+        ...S.inputBar,
+        ...(floating ? S.inputBarFloating : {}),
+        flexDirection: "column",
+        alignItems: "stretch",
+        gap: 6,
+      }}
     >
-      <span style={S.inputPlus}>+</span>
-      <input
-        ref={inputRef}
-        name="input"
-        value={value}
-        onChange={(e) => setValue(e.target.value)}
-        placeholder="할 일 — 선택: [프로젝트:기능] #태그"
-        title="할 일만 입력해도 OK. [프로젝트] · [프로젝트:기능] · #태그 모두 선택. 예: [디자인:로그인] #urgent 버튼 색상 변경"
-        style={S.inputField}
-        autoComplete="off"
-      />
-      <div style={S.inputChips}>
-        <span style={S.chipAccent}>{viewDefaultDueLabel(view)}</span>
+      {/* 입력 row — ProjectPicker / input / #picker / due chip / ↵ */}
+      <div style={S.inputRow}>
+        <ProjectPicker />
+        <input
+          ref={inputRef}
+          name="input"
+          value={value}
+          onChange={(e) => setValue(e.target.value)}
+          placeholder="할 일 — 선택: [프로젝트:기능] #태그"
+          title="할 일만 입력해도 OK. [프로젝트] · [프로젝트:기능] · #태그 모두 선택. 예: [디자인:로그인] #urgent 버튼 색상 변경"
+          style={S.inputField}
+          autoComplete="off"
+        />
+        <InputTagPicker
+          allTags={tags}
+          pendingTagIds={pendingTags.map((t) => t.id)}
+          onAdd={(tag) => setPickedTags((prev) => (prev.some((t) => t.id === tag.id) ? prev : [...prev, tag]))}
+        />
+        <div style={S.inputChips}>
+          <span style={S.chipAccent}>{viewDefaultDueLabel(view)}</span>
+        </div>
+        <span style={{ display: "flex", gap: 4 }}>
+          <KeyHint>↵</KeyHint>
+        </span>
       </div>
-      <span style={{ display: "flex", gap: 4 }}>
-        <KeyHint>↵</KeyHint>
-      </span>
+
+      {/* 태그 디스플레이 row — pending 태그가 있을 때만 렌더. due chip 의
+          fontSize 11 / padding 3px 9px 보다 살짝 작은 TagChip small (10 / 1px 7px)
+          로 "이 task 의 태그" 를 표현. × 는 pickedTags + 인풋 텍스트 양쪽을
+          정리. */}
+      {pendingTags.length > 0 && (
+        <div style={S.tagRow}>
+          {pendingTags.map((t) => (
+            <TagChip key={t.id} tag={t} small onRemove={() => removePending(t)} />
+          ))}
+        </div>
+      )}
     </form>
   );
 };
@@ -503,20 +585,21 @@ const S: Record<string, CSSProperties> = {
     background: "rgba(45,44,42,0.92)",
     backdropFilter: "blur(10px)",
   },
-  inputPlus: {
-    width: 22, height: 22, borderRadius: 5,
-    background: "var(--accent-dim)",
-    color: "var(--accent-bright)",
-    border: "1px solid var(--border-accent)",
-    display: "flex", alignItems: "center", justifyContent: "center",
-    fontSize: 14, lineHeight: 1, fontWeight: 600,
-  },
   inputField: {
     flex: 1, minWidth: 0,
     background: "transparent", border: "none", outline: "none",
     color: "var(--text-display)",
     fontFamily: "var(--font-body)", fontSize: 14,
     letterSpacing: -0.1,
+  },
+  inputRow: {
+    display: "flex", alignItems: "center", gap: 12,
+    minWidth: 0,
+  },
+  tagRow: {
+    display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap",
+    // ProjectPicker (22) + gap (12) = input field 시작점과 정렬.
+    paddingLeft: 34,
   },
   inputChips: { display: "flex", gap: 6 },
   chipAccent: {

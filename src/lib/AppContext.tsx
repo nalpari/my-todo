@@ -27,8 +27,9 @@ type AppContextValue = {
   toggleTask: (id: string, currentDone: boolean) => void;
   deleteTask: (id: string) => void;
   updateTaskTitle: (id: string, title: string) => void;
-  /** 새 프로젝트 — id 는 클라이언트가 crypto.randomUUID() 로 미리 발급. */
-  createProject: (id: string, name: string, color?: string) => void;
+  /** 새 프로젝트 — id 는 클라이언트가 crypto.randomUUID() 로 미리 발급.
+   *  insert 성공 시 true, 실패 시 false 로 resolve (reject 안 함). */
+  createProject: (id: string, name: string, color?: string) => Promise<boolean>;
   updateProject: (id: string, fields: { name?: string; color?: string }) => void;
   /** 삭제 → tasks 의 projectId 도 낙관적으로 null 로 cascade. */
   deleteProject: (id: string) => void;
@@ -214,14 +215,16 @@ export function AppProvider({ appData, children }: { appData: AppData; children:
   // Server Action 이 throw 하면 (1) try/catch 로 잡아 에러 메시지를 띄우고
   // (2) router.refresh() 로 서버 상태를 다시 가져와 낙관 잔존을 정정한다.
   // react-compiler 가 메모이제이션을 처리하므로 useCallback 은 쓰지 않는다.
-  const runAction = async (action: () => Promise<void>) => {
+  const runAction = async (action: () => Promise<void>): Promise<boolean> => {
     try {
       await action();
       setError(null);
+      return true;
     } catch (e) {
       const msg = e instanceof Error ? e.message : "알 수 없는 오류";
       setError({ msg, ts: Date.now() });
       router.refresh();
+      return false;
     }
   };
 
@@ -246,14 +249,19 @@ export function AppProvider({ appData, children }: { appData: AppData; children:
     });
   };
 
-  const createProject = (id: string, name: string, color?: string) => {
+  const createProject = (id: string, name: string, color?: string): Promise<boolean> => {
     const finalColor = color ?? DEFAULT_PROJECT_COLOR;
-    startTransition(() => {
-      applyOptimistic({
-        type: "project.create",
-        project: { id, name, color: finalColor, count: 0 },
+    // 성공 여부 Promise 반환 — 호출처(ProjectPicker)가 insert 성공 후에만
+    // URL ?project= 로 라우팅하도록. runAction 이 실패를 swallow + refresh 하므로
+    // reject 가 아니라 false 로 resolve 한다.
+    return new Promise<boolean>((resolve) => {
+      startTransition(() => {
+        applyOptimistic({
+          type: "project.create",
+          project: { id, name, color: finalColor, count: 0 },
+        });
+        void runAction(() => createProjectAction(id, name, finalColor)).then(resolve);
       });
-      void runAction(() => createProjectAction(id, name, finalColor));
     });
   };
 

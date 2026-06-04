@@ -241,6 +241,30 @@ async function ensureTags(
   return ids;
 }
 
+/**
+ * tag_ids 로 들어온 ID 들이 user 소유임을 검증하고 ID 배열을 반환. 미소유/미존재
+ * ID 가 하나라도 있으면 throw — 입력은 owner 가 만든 picker 라 안전 가정이지만
+ * RLS 우회 시 방어. 003 의 복합 FK 도 cross-tenant 를 차단하지만 raw 23503 보다
+ * 명확한 한국어 에러.
+ */
+async function assertOwnedTags(
+  supabase: Awaited<ReturnType<typeof createMutableClient>>,
+  ids: string[],
+  userId: string,
+): Promise<string[]> {
+  if (ids.length === 0) return [];
+  const { data, error } = await supabase
+    .from("tags")
+    .select("id")
+    .eq("user_id", userId)
+    .in("id", ids);
+  if (error) throw new Error(`태그 검증 실패: ${error.message}`);
+  if (!data || data.length !== ids.length) {
+    throw new Error("일부 태그를 찾을 수 없거나 소유권이 없습니다");
+  }
+  return data.map((d) => d.id);
+}
+
 export async function createTask(formData: FormData) {
   const rawInput = formData.get("input");
   if (typeof rawInput !== "string" || !rawInput.trim()) {
@@ -259,6 +283,21 @@ export async function createTask(formData: FormData) {
   // 입력에 `[project]` 토큰이 없을 때 InputBar 가 활성 프로젝트 필터를
   // fallback 으로 전달 — 기존 quick-add 경험을 유지.
   const fallbackProjectId = parseNullableUuid(formData.get("project_id"));
+  // 픽커로 선택된 태그 ID (comma-separated UUIDs). 인풋 `#tag` 와 같은 사용자
+  // 의도 두 경로 — 서버에서 두 결과의 union 으로 dedupe.
+  const rawTagIds = formData.get("tag_ids");
+  // Set 으로 중복 id 제거 — assertOwnedTags 가 `data.length !== ids.length` 로
+  // 소유권을 검증하므로, client 가 같은 id 를 두 번 보내면 길이 불일치로 소유한
+  // 태그가 "소유권 없음" 으로 오발화한다. 진입부에서 dedupe 해 false-negative 차단.
+  const tagIdsFromForm =
+    typeof rawTagIds === "string" && rawTagIds.length > 0
+      ? Array.from(new Set(rawTagIds.split(",").map((s) => s.trim()).filter(Boolean)))
+      : [];
+  // 빈 문자열은 위에서 이미 제거됨 — parseNullableUuid 는 throw 이므로
+  // 잘못된 포맷은 즉시 잡혀 사용자 의도(클릭 시점의 ID) 가 아닌 입력 오류로 표면화.
+  const parsedTagIds = tagIdsFromForm
+    .map((id) => parseNullableUuid(id))
+    .filter((id): id is string => id !== null);
 
   const { supabase, user } = await requireUser();
 
@@ -280,7 +319,10 @@ export async function createTask(formData: FormData) {
     featureId = await ensureFeature(supabase, projectId, featureName, user.id);
   }
 
-  const tagIds = tagNames.length > 0 ? await ensureTags(supabase, tagNames, user.id) : [];
+  const tagIdsFromNames = tagNames.length > 0 ? await ensureTags(supabase, tagNames, user.id) : [];
+  const tagIdsFromPicker = await assertOwnedTags(supabase, parsedTagIds, user.id);
+  // dedupe by id — 같은 태그가 인풋과 픽커 양쪽에서 들어와도 1회만 insert.
+  const tagIds = Array.from(new Set([...tagIdsFromNames, ...tagIdsFromPicker]));
 
   const { data: task, error: taskError } = await supabase
     .from("tasks")

@@ -17,7 +17,7 @@ const jetbrainsMono = JetBrains_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "치트키 Todo",
+  title: "Todo Plug",
   description: "오늘 할 일, 한 줄로 충분합니다.",
 };
 

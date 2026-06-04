@@ -1,3 +1,4 @@
+import { Suspense } from "react";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { VariantBSplit } from "@/components/VariantBSplit";
@@ -25,5 +26,14 @@ export default async function Home() {
 
   const appData = await getAppData();
 
-  return <VariantBSplit user={displayUser} appData={appData} />;
+  // VariantBSplit 하위의 여러 클라이언트 컴포넌트(ProjectList · TagList ·
+  // ProjectPicker · AppShell 등)가 useSearchParams() 를 호출하므로 반드시
+  // <Suspense> 경계가 필요. Next.js 16 prerender 단계에서 경계가 없으면
+  // BailoutToCSRError 가 던져져 "useSearchParams() should be wrapped in a
+  // suspense boundary" 런타임 에러 발생.
+  return (
+    <Suspense>
+      <VariantBSplit user={displayUser} appData={appData} />
+    </Suspense>
+  );
 }

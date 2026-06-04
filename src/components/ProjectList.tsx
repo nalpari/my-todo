@@ -285,7 +285,7 @@ const NewProjectRow = ({ onDone }: { onDone: () => void }) => {
 
 /* ─── SwatchPopover ─────────────────────────────────────── */
 
-const SwatchPopover = ({
+export const SwatchPopover = ({
   selected,
   onPick,
 }: {
