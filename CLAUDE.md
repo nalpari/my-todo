@@ -47,10 +47,13 @@ login/page.tsx (RSC 인증가드) → AuthScreen
 
 ### Component layers (in `src/components/`)
 
-- `Primitives.tsx` — atoms: `Checkbox`, `ProjectDot`, `TagChip`, `MonoLabel`, `KeyHint`, `DayHeader`
-- `AppShell.tsx` — `AppSidebar` (user/nav/projects/tags), `AppTopBar` (title + search + filter), `InputBar` (the "+ 할 일 추가" composer)
+- `Primitives.tsx` — atoms: `Checkbox`, `Switch`, `ProjectDot`, `TagChip`, `MonoLabel`, `KeyHint`, `GoogleIcon`, `DayHeader`
+- `AppShell.tsx` — `AppSidebar` (user/nav/projects/tags), `AppTopBar` (title + search + filter), `InputBar` (the "+ 할 일 추가" composer — 인라인 `ProjectPicker` · `InputTagPicker` 임베드)
+- `ProjectPicker.tsx` — InputBar prefix `+` 자리의 프로젝트 선택 팝오버. 선택 = URL `?project=` 토글 (사이드바 active · TopBar chip 과 linked). `SwatchPopover`/`NewProjectRow` 패턴 재사용
+- `InputTagPicker.tsx` — InputBar 의 `#` 트리거 태그 팝오버 (add-only; 제거는 아래 tag display row 의 × 가 인풋 텍스트까지 strip)
 - `TaskRow.tsx` — task rendering plus `MiniCalendar`, `SubtaskMeter`
-- `AuthScreen.tsx` — visual-only login (the `onSignIn` callback is fired by any button)
+- `AuthScreen.tsx` — 로그인 화면. `<form action={signInWithGoogle}>` + `GoogleSignInButton`
+- `GoogleSignInButton.tsx` — `useFormStatus` 로 pending 처리하는 client 버튼 (AuthScreen 은 RSC). 더블클릭 PKCE race 방지
 - `VariantBSplit.tsx` — the only "real" screen: sidebar + hour timeline + right rail (mini calendar / upcoming / progress)
 
 The "Variant B" name is intentional: the design source defined three variants (A · Editorial Timeline, B · Split Calendar+Timeline, C · Week Spread). Only **B is built**. If the user asks for "the week spread" or "editorial timeline" view, they mean the unbuilt variants, not a refactor of B.
@@ -220,46 +223,48 @@ If a task seems to require any of these, confirm with the user before adding the
 - task 완료시 CLAUDE.md, AGENTS.md 및 README.md 문서에 업데이트가 필요하면 진행한다.
 - 작업시 한 문장으로 설명되는 의미있는 단위로 commit 한다.
 
-<!-- gitnexus:start -->
-# GitNexus — Code Intelligence
+<!-- codegraph:start -->
+# CodeGraph — Code Intelligence
 
-This project is indexed by GitNexus as **my-todo** (744 symbols, 1345 relationships, 63 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
+This project is indexed by CodeGraph (로컬 SQLite 인덱스, `.codegraph/`). CodeGraph MCP 도구로 심볼·호출그래프·변경 영향을 파악한다. `.mcp.json` 에 `codegraph serve --mcp` stdio 서버 등록됨.
 
-> If any GitNexus tool warns the index is stale, run `npx gitnexus analyze` in terminal first.
+> 인덱스가 오래됐다고 경고하면 터미널에서 `codegraph sync` (증분) 또는 `codegraph index` (전체) 를 먼저 실행한다.
 
 ## Always Do
 
-- **MUST run impact analysis before editing any symbol.** Before modifying a function, class, or method, run `gitnexus_impact({target: "symbolName", direction: "upstream"})` and report the blast radius (direct callers, affected processes, risk level) to the user.
-- **MUST run `gitnexus_detect_changes()` before committing** to verify your changes only affect expected symbols and execution flows.
-- **MUST warn the user** if impact analysis returns HIGH or CRITICAL risk before proceeding with edits.
-- When exploring unfamiliar code, use `gitnexus_query({query: "concept"})` to find execution flows instead of grepping. It returns process-grouped results ranked by relevance.
-- When you need full context on a specific symbol — callers, callees, which execution flows it participates in — use `gitnexus_context({name: "symbolName"})`.
+- **심볼 편집 전 반드시 영향 분석.** function/class/method 를 수정하기 전 `codegraph_impact` 로 blast radius (소비처·영향 파일) 를 확인하고 사용자에게 보고한다.
+- 넓은 변경이 영향 파일이 많게 나오면 **진행 전 사용자에게 경고**한다.
+- 낯선 코드를 탐색할 때는 grep 대신 `codegraph_search` / `codegraph_explore` 로 심볼과 관계를 찾는다.
+- 특정 심볼의 호출관계가 필요하면 `codegraph_callers` (호출하는 쪽) / `codegraph_callees` (호출당하는 쪽) / `codegraph_node` (심볼 컨텍스트) 를 쓴다.
 
 ## Never Do
 
-- NEVER edit a function, class, or method without first running `gitnexus_impact` on it.
-- NEVER ignore HIGH or CRITICAL risk warnings from impact analysis.
-- NEVER rename symbols with find-and-replace — use `gitnexus_rename` which understands the call graph.
-- NEVER commit changes without running `gitnexus_detect_changes()` to check affected scope.
+- function/class/method 를 `codegraph_impact` 없이 편집하지 않는다.
+- 영향 분석에서 광범위한 blast radius 가 나왔는데 경고 없이 진행하지 않는다.
+- 심볼 rename 을 단순 find-and-replace 로 하지 않는다 — 먼저 `codegraph_callers`/`codegraph_impact` 로 참조 지점을 전부 확인한 뒤 수정한다.
 
-## Resources
+## MCP 도구
 
-| Resource | Use for |
-|----------|---------|
-| `gitnexus://repo/my-todo/context` | Codebase overview, check index freshness |
-| `gitnexus://repo/my-todo/clusters` | All functional areas |
-| `gitnexus://repo/my-todo/processes` | All execution flows |
-| `gitnexus://repo/my-todo/process/{name}` | Step-by-step execution trace |
+| 도구 | 용도 |
+|------|------|
+| `codegraph_status` | 인덱스 상태·통계, freshness 확인 |
+| `codegraph_search` | 심볼 검색 (정의 위치·시그니처) |
+| `codegraph_explore` | 코드 구조·관계 탐색 |
+| `codegraph_node` | 특정 심볼의 전체 컨텍스트 |
+| `codegraph_callers` | 해당 심볼을 호출하는 쪽 |
+| `codegraph_callees` | 해당 심볼이 호출하는 쪽 |
+| `codegraph_impact` | 심볼 변경의 영향 범위 (blast radius) |
+| `codegraph_files` | 프로젝트 파일 구조 + 파일별 심볼 수 |
 
 ## CLI
 
-| Task | Read this skill file |
-|------|---------------------|
-| Understand architecture / "How does X work?" | `.claude/skills/gitnexus/gitnexus-exploring/SKILL.md` |
-| Blast radius / "What breaks if I change X?" | `.claude/skills/gitnexus/gitnexus-impact-analysis/SKILL.md` |
-| Trace bugs / "Why is X failing?" | `.claude/skills/gitnexus/gitnexus-debugging/SKILL.md` |
-| Rename / extract / split / refactor | `.claude/skills/gitnexus/gitnexus-refactoring/SKILL.md` |
-| Tools, resources, schema reference | `.claude/skills/gitnexus/gitnexus-guide/SKILL.md` |
-| Index, status, clean, wiki CLI commands | `.claude/skills/gitnexus/gitnexus-cli/SKILL.md` |
+| 작업 | 명령 |
+|------|------|
+| 인덱스 상태/통계 | `codegraph status` |
+| 증분 동기화 / 전체 재인덱스 | `codegraph sync` / `codegraph index` |
+| 심볼 검색 | `codegraph query <search>` |
+| 호출 그래프 | `codegraph callers <symbol>` / `codegraph callees <symbol>` |
+| 변경 영향 분석 | `codegraph impact <symbol>` |
+| 변경된 소스에 영향받는 테스트 | `codegraph affected [files...]` |
 
-<!-- gitnexus:end -->
+<!-- codegraph:end -->
